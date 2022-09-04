@@ -1,0 +1,7 @@
+[submodule "flutter-embedded-linux"]
+	path = flutter-embedded-linux
+	url = https://github.com/NotKit/flutter-embedded-linux.git
+	branch = 3.3.0-ut
+[submodule "fluffychat"]
+	path = fluffychat
+	url = https://gitlab.com/famedly/fluffychat.git

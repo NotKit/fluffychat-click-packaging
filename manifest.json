@@ -1,0 +1,15 @@
+{
+    "name": "fluffychat.im",
+    "description": "Matrix client",
+    "architecture": "@CLICK_ARCH@",
+    "title": "FluffyChat",
+    "hooks": {
+        "fluffychat": {
+            "apparmor": "fluffychat.apparmor",
+            "desktop":  "fluffychat.desktop"
+        }
+    },
+    "version": "1.0.0",
+    "maintainer": "Your FullName <email@domain.org>",
+    "framework" : "@CLICK_FRAMEWORK@"
+}

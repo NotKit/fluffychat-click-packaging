@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=FluffyChat
+Exec=fluffychat --bundle=. -f %U
+Icon=assets/logo.svg
+Terminal=false
+Type=Application
+X-Ubuntu-Touch=true
