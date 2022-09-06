@@ -7,22 +7,28 @@ jobs:
   build:
     strategy:
       matrix:
-        arch: [amd64, arm64, armhf]
+        arch: [amd64, arm64]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v3
         with:
           submodules: 'true'
+      - name: Parse version
+        run: |
+          echo ARTIFACT_VERSION=$(cd fluffychat && git describe | awk '{print substr($0,2); }') >> $GITHUB_ENV
       - name: Install clickable
         run: |
           python3 -m pip install clickable-ut
+      - name: Build libraries
+        run: |
+          clickable build --libs --arch ${{ matrix.arch }}
       - name: Build
         run: |
-          clickable build --arch ${{ matrix.arch }}
+          clickable build --accept-review-warnings --arch ${{ matrix.arch }}
       - name: Upload Artifacts
         uses: actions/upload-artifact@v3
         with:
-          name: cinny.nitanmarcel_${{ matrix.arch }}
+          name: fluffychat.im_${{ env.ARTIFACT_VERSION }}_${{ matrix.arch }}
           path: build/*/app/*.click
           if-no-files-found: error
