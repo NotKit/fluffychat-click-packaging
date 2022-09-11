@@ -28,3 +28,8 @@ cp ${FLUTTER_ELINUX_LIB_BUILD_DIR}/libflutter_elinux_wayland.so ${INSTALL_DIR}/l
 cp ${ROOT}/manifest.json ${INSTALL_DIR}/manifest.json
 cp ${ROOT}/fluffychat.{desktop,apparmor} ${INSTALL_DIR}/
 install -D ${SRC_DIR}/assets/logo.svg ${INSTALL_DIR}/assets/logo.svg
+
+# Workaround for missing library symlinks in GitHub actions build
+mkdir -p ${CLICK_LD_LIBRARY_PATH}
+ln -s libmaliit-glib.so.0.99.1 ${CLICK_LD_LIBRARY_PATH}/libmaliit-glib.so.0.99
+ln -s libmaliit-glib.so.0.99 ${CLICK_LD_LIBRARY_PATH}/libmaliit-glib.so.0
