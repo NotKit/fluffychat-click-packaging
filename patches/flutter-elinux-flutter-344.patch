@@ -1,0 +1,39 @@
+--- a/lib/commands/build.dart	2026-05-23 01:47:30.710588192 +0300
++++ b/lib/commands/build.dart	2026-05-23 01:48:56.239832310 +0300
+@@ -19,15 +19,27 @@
+ import '../elinux_plugins.dart';
+ 
+ class ELinuxBuildCommand extends BuildCommand {
+-  ELinuxBuildCommand({bool verboseHelp = false})
+-      : super(
+-          fileSystem: globals.fs,
+-          buildSystem: globals.buildSystem,
+-          osUtils: globals.os,
+-          verboseHelp: verboseHelp,
+-          androidSdk: globals.androidSdk,
+-          logger: globals.logger,
+-        ) {
++   ELinuxBuildCommand({bool verboseHelp = false})
++       : super(
++           artifacts: globals.artifacts!,
++           cache: globals.cache,
++           fileSystem: globals.fs,
++           flutterVersion: globals.flutterVersion,
++           buildSystem: globals.buildSystem,
++           osUtils: globals.os,
++           verboseHelp: verboseHelp,
++           androidSdk: globals.androidSdk,
++           logger: globals.logger,
++           config: globals.config,
++           platform: globals.platform,
++           processUtils: globals.processUtils,
++           processManager: globals.processManager,
++           fileSystemUtils: globals.fsUtils,
++           templateRenderer: globals.templateRenderer,
++           terminal: globals.terminal,
++           plistParser: globals.plistParser,
++           xcode: globals.xcode,
++         ) {
+     addSubcommand(BuildPackageCommand(verboseHelp: verboseHelp));
+   }
+ }
