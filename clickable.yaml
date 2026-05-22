@@ -2,52 +2,64 @@ clickable_minimum_required: 7.1.2
 builder: custom
 kill: fluffychat
 
-dependencies_ppa:
- - ppa:ubuntu-toolchain-r/test
-
 dependencies_host:
-- clang-8
-- libstdc++-7-dev
+- python3
+- curl
+- git
+- cmake
+- build-essential
+- clang
+- ninja-build
+- pkg-config
+- liblzma-dev
+- zip
+- unzip
 
 dependencies_target:
-- libstdc++-7-dev
-- libmaliit-glib0
-
-image_setup:
-  run:
-  - 'ln -sf clang-8 /usr/bin/clang && ln -sf clang++-8 /usr/bin/clang++'
-
-src_dir: fluffychat
+- libegl1-mesa-dev
+- libgles2-mesa-dev
+- libglib2.0-dev
+- libwayland-dev
+- libxkbcommon-dev
+- libdrm-dev
+- libgbm-dev
+- libinput-dev
+- libudev-dev
+- libsystemd-dev
+- wayland-protocols
+- libfontconfig-dev
+- libmaliit-glib-dev
 
 build:
-- ${ROOT}/build.sh 3.3.0
-
-install_lib:
-- /usr/lib/libmaliit-glib.so.*
+- ${ROOT}/build.sh
 
 libraries:
   flutter_elinux:
     src_dir: flutter-embedded-linux
     builder: cmake
     build_args:
-    - -DBUILD_ELINUX_SO=ON -DBACKEND_TYPE=WAYLAND -DCMAKE_BUILD_TYPE=Release
-    - -DENABLE_ELINUX_EMBEDDER_LOG=ON -DFLUTTER_RELEASE=ON
-    dependencies_ppa:
-    - ppa:ubuntu-toolchain-r/test
-    - '"deb http://repo.ubports.com/ xenial_-_edge main"'
+    - -DBUILD_ELINUX_SO=ON
+    - -DBACKEND_TYPE=WAYLAND
+    - -DCMAKE_BUILD_TYPE=Release
+    - -DFLUTTER_RELEASE=ON
+    - -DENABLE_ELINUX_EMBEDDER_LOG=OFF
     dependencies_host:
-    - clang-8
-    - libstdc++-7-dev
-    - wayland-protocols
+    - clang
+    - zip
+    - unzip
     dependencies_target:
     - libegl1-mesa-dev
     - libgles2-mesa-dev
     - libglib2.0-dev
-    - libmaliit-glib-dev
-    - libstdc++-7-dev
     - libwayland-dev
-    image_setup:
-      run:
-      - 'ln -sf clang-8 /usr/bin/clang && ln -sf clang++-8 /usr/bin/clang++'
+    - libxkbcommon-dev
+    - libdrm-dev
+    - libgbm-dev
+    - libinput-dev
+    - libudev-dev
+    - wayland-protocols
+    - libmaliit-glib-dev
     prebuild:
-    - ${ROOT}/prebuild-flutter-embedded-linux.sh 5e9e0e0aa8 ${SRC_DIR}/build
+    - ${ROOT}/prebuild-flutter-embedded-linux.sh
+    postbuild:
+    - ${ROOT}/postbuild-flutter-embedded-linux.sh

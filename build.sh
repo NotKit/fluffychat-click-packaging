@@ -1,35 +1,97 @@
 #!/bin/bash
+# Build FluffyChat for Ubuntu Touch using flutter-elinux
 set -e
 
-RELEASE_TAG="$1"
-
+FLUTTER_VERSION="3.44.0"
 FLUTTER_ARCH="$ARCH"
 if [ "$ARCH" == "amd64" ]; then
     FLUTTER_ARCH="x64"
 fi
 
-FLUTTER_PATH="${ROOT}/build/flutter-elinux"
+# Flutter SDK (standard Flutter 3.44.0)
+FLUTTER_SDK_PATH="${ROOT}/build/flutter-elinux"
+# flutter-elinux tool (community fork ported to Flutter 3.44.0)
+FLUTTER_ELINUX_TOOL_PATH="${ROOT}/build/flutter-elinux-tool"
 
-[ -d "$FLUTTER_PATH" ] || git clone https://github.com/sony/flutter-elinux.git "$FLUTTER_PATH" -b "$RELEASE_TAG" --depth 1
+if [ ! -d "$FLUTTER_SDK_PATH" ]; then
+    echo "Cloning Flutter SDK ${FLUTTER_VERSION}..."
+    git clone https://github.com/flutter/flutter.git \
+        "$FLUTTER_SDK_PATH" --depth 1 -b "${FLUTTER_VERSION}"
+fi
 
-PATH="$PATH:$FLUTTER_PATH/bin"
+if [ ! -d "$FLUTTER_ELINUX_TOOL_PATH" ]; then
+    echo "Cloning flutter-elinux tool..."
+    git clone https://github.com/flutter-elinux/flutter-elinux.git \
+        "$FLUTTER_ELINUX_TOOL_PATH" --depth 1
+fi
 
-flutter-elinux doctor
+# Always ensure the Flutter 3.44.0 compatibility patch is applied (idempotent)
+patch -d "$FLUTTER_ELINUX_TOOL_PATH" -p1 --forward --reject-file=/dev/null \
+    < "${ROOT}/patches/flutter-elinux-flutter-344.patch" 2>/dev/null || true
 
-cd "$SRC_DIR"
+ELINUX_TOOL_STAMP="$FLUTTER_ELINUX_TOOL_PATH/bin/cache/flutter-elinux.snapshot"
+if [ ! -f "$ELINUX_TOOL_STAMP" ]; then
+    # Symlink the Flutter SDK into the tool directory (expected by flutter-elinux)
+    ln -sfn "$FLUTTER_SDK_PATH" "$FLUTTER_ELINUX_TOOL_PATH/flutter"
+    # Bootstrap the Flutter SDK (populates bin/cache/dart-sdk)
+    "$FLUTTER_SDK_PATH/bin/flutter" --version > /dev/null
+    # pub get + compile the flutter-elinux snapshot
+    (cd "$FLUTTER_ELINUX_TOOL_PATH" && \
+        "$FLUTTER_SDK_PATH/bin/flutter" pub get && \
+        mkdir -p bin/cache && \
+        "$FLUTTER_SDK_PATH/bin/cache/dart-sdk/bin/dart" \
+            --disable-dart-dev --no-enable-mirrors \
+            --snapshot="bin/cache/flutter-elinux.snapshot" \
+            --packages=".dart_tool/package_config.json" \
+            bin/flutter_elinux.dart)
+fi
+
+# Wrapper script to invoke the flutter-elinux snapshot via the bundled dart
+FLUTTER_ELINUX_BIN="$FLUTTER_ELINUX_TOOL_PATH/bin/flutter-elinux-run"
+cat > "$FLUTTER_ELINUX_BIN" << 'WRAPPER'
+#!/usr/bin/env bash
+set -e
+BIN_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+ROOT_DIR="$(dirname "$BIN_DIR")"
+exec "$ROOT_DIR/flutter/bin/cache/dart-sdk/bin/dart" \
+    --disable-dart-dev \
+    --packages="$ROOT_DIR/.dart_tool/package_config.json" \
+    "$BIN_DIR/cache/flutter-elinux.snapshot" "$@"
+WRAPPER
+chmod +x "$FLUTTER_ELINUX_BIN"
+
+export FLUTTER_ROOT="$FLUTTER_SDK_PATH"
+export PATH="$PATH:$FLUTTER_SDK_PATH/bin"
+
+FLUFFYCHAT_DIR="${ROOT}/fluffychat"
+cd "$FLUFFYCHAT_DIR"
+
+# Get dependencies
+flutter pub get
+
+# Copy elinux-specific project files (runner, CMakeLists, etc.)
 cp -rT "${ROOT}/fluffychat-elinux" elinux
 
-flutter-elinux pub get
-flutter-elinux build elinux --target-arch=${FLUTTER_ARCH}
+# Point flutter-elinux at the locally built artifact zips
+# (assembled by postbuild-flutter-embedded-linux.sh after the cmake library build)
+ZIPS_DIR="${ROOT}/build/elinux-artifact-zips"
+if [ ! -d "$ZIPS_DIR" ] || [ ! -f "$ZIPS_DIR/elinux-${FLUTTER_ARCH}-release.zip" ]; then
+    echo "ERROR: elinux artifact zips not found at ${ZIPS_DIR}"
+    echo "The flutter_elinux library must be built first (clickable builds libraries before the main app)."
+    exit 1
+fi
+export ELINUX_ENGINE_BASE_LOCAL_DIRECTORY="$ZIPS_DIR"
 
-cp -r build/elinux/${FLUTTER_ARCH}/release/bundle/* ${INSTALL_DIR}/
-cp ${FLUTTER_ELINUX_LIB_BUILD_DIR}/libflutter_elinux_wayland.so ${INSTALL_DIR}/lib/libflutter_elinux_wayland.so
+# Populate the flutter-elinux tool's artifact cache from local zips
+"$FLUTTER_ELINUX_BIN" precache --elinux --no-android --no-ios --no-web \
+    --no-linux --no-macos --no-windows --no-fuchsia
 
+# Build — produces build/elinux/<arch>/release/bundle/
+"$FLUTTER_ELINUX_BIN" build elinux --release --target-arch=${FLUTTER_ARCH}
+
+cp -r "build/elinux/${FLUTTER_ARCH}/release/bundle/"* "${INSTALL_DIR}/"
+
+# Install packaging metadata
 cp ${ROOT}/manifest.json ${INSTALL_DIR}/manifest.json
 cp ${ROOT}/fluffychat.{desktop,apparmor} ${INSTALL_DIR}/
-install -D ${SRC_DIR}/assets/logo.svg ${INSTALL_DIR}/assets/logo.svg
-
-# Workaround for missing library symlinks in GitHub actions build
-mkdir -p ${CLICK_LD_LIBRARY_PATH}
-ln -s libmaliit-glib.so.0.99.1 ${CLICK_LD_LIBRARY_PATH}/libmaliit-glib.so.0.99
-ln -s libmaliit-glib.so.0.99 ${CLICK_LD_LIBRARY_PATH}/libmaliit-glib.so.0
+install -D ${FLUFFYCHAT_DIR}/assets/logo.svg ${INSTALL_DIR}/assets/logo.svg
