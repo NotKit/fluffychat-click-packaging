@@ -6,7 +6,7 @@
 # Environment: ROOT, BUILD_DIR, INSTALL_DIR, ARCH are set by clickable.
 set -e
 
-ENGINE_DIR="${ROOT}/build/engine-artifacts"
+ENGINE_DIR="${ROOT}/build/engine-artifacts/${ARCH}"
 ZIPS_DIR="${ROOT}/build/elinux-artifact-zips"
 mkdir -p "${ZIPS_DIR}"
 
@@ -14,6 +14,33 @@ if [ "${ARCH}" = "amd64" ]; then
     FLUTTER_ARCH="x64"
 else
     FLUTTER_ARCH="arm64"
+fi
+
+# Detect the host architecture.  gen_snapshot is a native host binary;
+# flutter-elinux's elinux_artifacts.dart looks for it at
+# elinux-{target}-{mode}/linux-{host_arch}/gen_snapshot, so the subdir
+# in the zip must match the host we actually run on.
+HOST_MACHINE="$(uname -m)"
+if [ "${HOST_MACHINE}" = "x86_64" ]; then
+    HOST_FLUTTER_ARCH="x64"
+else
+    HOST_FLUTTER_ARCH="arm64"
+fi
+GEN_SNAPSHOT_SUBDIR="linux-${HOST_FLUTTER_ARCH}"
+
+# gen_snapshot was downloaded by prebuild from the target-arch artifacts.zip.
+# For self-builds (host == target), this is the correct native binary.
+GEN_SNAPSHOT="${ENGINE_DIR}/gen_snapshot"
+if [ ! -f "${GEN_SNAPSHOT}" ]; then
+    echo "ERROR: gen_snapshot not found at ${GEN_SNAPSHOT}"
+    exit 1
+fi
+chmod +x "${GEN_SNAPSHOT}"
+
+ENGINE_LIB="${ENGINE_DIR}/libflutter_engine.so"
+if [ ! -f "${ENGINE_LIB}" ]; then
+    echo "ERROR: libflutter_engine.so not found at ${ENGINE_LIB}"
+    exit 1
 fi
 
 # libflutter_elinux_wayland.so is in the cmake build directory.
@@ -28,23 +55,23 @@ echo "Using embedder lib: ${EMBEDDER_LIB}"
 echo "Packaging elinux artifacts into zip layout for flutter-elinux tool..."
 
 make_arch_zip() {
-    local ARCH_NAME="$1"  # x64 or arm64
-    local MODE="$2"       # release, debug, profile
+    local ARCH_NAME="$1"   # x64 or arm64
+    local MODE="$2"        # release, debug, profile
     local ZIP="${ZIPS_DIR}/elinux-${ARCH_NAME}-${MODE}.zip"
     local TMP
     TMP="$(mktemp -d)"
-    mkdir -p "${TMP}/linux-${ARCH_NAME}"
-    cp "${EMBEDDER_LIB}"                    "${TMP}/libflutter_elinux_wayland.so"
-    cp "${ENGINE_DIR}/libflutter_engine.so" "${TMP}/libflutter_engine.so"
-    cp "${ENGINE_DIR}/gen_snapshot"         "${TMP}/linux-${ARCH_NAME}/gen_snapshot"
+    mkdir -p "${TMP}/${GEN_SNAPSHOT_SUBDIR}"
+    cp "${EMBEDDER_LIB}"  "${TMP}/libflutter_elinux_wayland.so"
+    cp "${ENGINE_LIB}"    "${TMP}/libflutter_engine.so"
+    cp "${GEN_SNAPSHOT}"  "${TMP}/${GEN_SNAPSHOT_SUBDIR}/gen_snapshot"
     (cd "${TMP}" && zip -r "${ZIP}" .)
     rm -rf "${TMP}"
     echo "  Created: ${ZIP}"
 }
 
 # flutter-elinux precache unconditionally downloads all 6 arch+mode zips.
-# We always build for the target arch; for the other arch, provide the same lib
-# as a stub (it won't be used at runtime on the target device).
+# We only build for the target arch; the other arch zips are stubs
+# (same libs reused) and are never used at runtime on the target device.
 for ARCH_NAME in x64 arm64; do
     for MODE in release debug profile; do
         make_arch_zip "${ARCH_NAME}" "${MODE}"

@@ -5,8 +5,8 @@
 set -e
 
 ENGINE_HASH="4c525dac5ebe5971c5708ef73558ed8edcf4a362"
-ENGINE_DIR="${ROOT}/build/engine-artifacts"
 ARCH="${ARCH:-amd64}"
+ENGINE_DIR="${ROOT}/build/engine-artifacts/${ARCH}"
 
 if [ "$ARCH" = "amd64" ]; then
     FLUTTER_ARCH="x64"

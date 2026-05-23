@@ -1,0 +1,44 @@
+From: TheKit <nekit1000@gmail.com>
+Date: Mon Sep 5 01:17:15 2022 +0300
+Subject: [wayland] UT hack: override scale factor based on GRID_UNIT_PX env
+
+diff --git a/src/flutter/shell/platform/linux_embedded/window/elinux_window_wayland.cc b/src/flutter/shell/platform/linux_embedded/window/elinux_window_wayland.cc
+index xxxxxxx..xxxxxxx 100644
+--- a/src/flutter/shell/platform/linux_embedded/window/elinux_window_wayland.cc
++++ b/src/flutter/shell/platform/linux_embedded/window/elinux_window_wayland.cc
+@@ -xx,6 +xx,15 @@
+ 
+ static constexpr int32_t kDecoSizeBar = 32;
+ 
++static int32_t GetScaleFactor() {
++  const char* grid_unit_px = getenv("GRID_UNIT_PX");
++  if (grid_unit_px) {
++    int32_t scale = atoi(grid_unit_px) / 8;
++    if (scale >= 1) return scale;
++  }
++  return 1;
++}
++
+ namespace flutter {
+ 
+ namespace {
+
+From: TheKit <nekit1000@gmail.com>
+Date: Mon Sep 5 01:30:43 2022 +0300
+Subject: [cmake] set compiler target based on ARCH_TRIPLET env
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index xxxxxxx..xxxxxxx 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -xx,6 +xx,10 @@
+ # See the README for more details.
+ cmake_minimum_required(VERSION 3.15)
+ 
++if(DEFINED ENV{ARCH_TRIPLET})
++  set(CMAKE_C_COMPILER_TARGET $ENV{ARCH_TRIPLET})
++  set(CMAKE_CXX_COMPILER_TARGET $ENV{ARCH_TRIPLET})
++endif()
++
+ # User configuration file.
+ include(cmake/user_config.cmake OPTIONAL)

@@ -82,11 +82,17 @@ if [ ! -d "$ZIPS_DIR" ] || [ ! -f "$ZIPS_DIR/elinux-${FLUTTER_ARCH}-release.zip"
 fi
 export ELINUX_ENGINE_BASE_LOCAL_DIRECTORY="$ZIPS_DIR"
 
-# Populate the flutter-elinux tool's artifact cache from local zips
+# Populate the flutter-elinux tool's artifact cache from local zips.
+# Clear ephemeral dir and elinux precache first so the correct arch is used.
+rm -rf "${FLUFFYCHAT_DIR}/elinux/flutter/ephemeral"
+rm -rf "${FLUTTER_ELINUX_TOOL_PATH}/flutter/bin/cache/artifacts/engine/elinux-"*
 "$FLUTTER_ELINUX_BIN" precache --elinux --no-android --no-ios --no-web \
     --no-linux --no-macos --no-windows --no-fuchsia
 
 # Build — produces build/elinux/<arch>/release/bundle/
+# Suppress -Werror in the elinux CMakeLists.txt so third-party plugins compile
+# cleanly (APPLY_STANDARD_SETTINGS sets -Wall -Werror which triggers in some plugins).
+sed -i 's/-Wall -Werror/-Wall/' "${FLUFFYCHAT_DIR}/elinux/CMakeLists.txt"
 "$FLUTTER_ELINUX_BIN" build elinux --release --target-arch=${FLUTTER_ARCH}
 
 cp -r "build/elinux/${FLUTTER_ARCH}/release/bundle/"* "${INSTALL_DIR}/"

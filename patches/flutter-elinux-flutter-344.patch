@@ -1,3 +1,17 @@
+--- a/lib/elinux_artifacts.dart
++++ b/lib/elinux_artifacts.dart
+@@ -36,7 +36,8 @@ class ELinuxArtifacts extends CachedArtifacts {
+     final HostPlatform hostPlatform = getCurrentHostPlatform();
+
+     // Use elinux-*-*/linux-x64/gen_snapshot only when the host pc is x64 arch.
+-    // The other causes use linux-desktop's one.
++    // Also handle linux_arm64 hosts for self-builds on arm64 machines.
+     if (artifact == Artifact.genSnapshot &&
+-        hostPlatform == HostPlatform.linux_x64 &&
++        (hostPlatform == HostPlatform.linux_x64 ||
++            hostPlatform == HostPlatform.linux_arm64) &&
+         platform != null &&
+         getNameForTargetPlatform(platform).startsWith('linux')) {
 --- a/lib/commands/build.dart	2026-05-23 01:47:30.710588192 +0300
 +++ b/lib/commands/build.dart	2026-05-23 01:48:56.239832310 +0300
 @@ -19,15 +19,27 @@
