@@ -15,23 +15,147 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           submodules: 'true'
       - name: Parse version
         run: |
           echo ARTIFACT_VERSION=$(cd fluffychat && git describe | awk '{print substr($0,2); }') >> $GITHUB_ENV
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/local/share/boost \
+                      /opt/ghc /usr/local/.ghcup /usr/lib/jvm /opt/hostedtoolcache/CodeQL
+          df -h
+
       - name: Install clickable
         run: |
           python3 -m pip install clickable-ut
+
+      - name: Restore Flutter release engine cache
+        id: engine-cache
+        uses: actions/cache@v4
+        with:
+          path: build/engine-artifacts/${{ matrix.arch }}
+          key: flutter-release-engine-v3-${{ matrix.arch }}-4c525dac5ebe5971c5708ef73558ed8edcf4a362
+
+      - name: Cache Rust toolchain + vodozemac build
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/rustup
+            build/cargo
+            build/vodozemac-target
+          key: vodozemac-rust-${{ matrix.arch }}-${{ hashFiles('fluffychat/pubspec.lock') }}
+
+      - name: Build Flutter release engine
+        if: steps.engine-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git /tmp/depot_tools
+          export PATH="/tmp/depot_tools:$PATH"
+
+          mkdir /tmp/engine_src && cd /tmp/engine_src
+
+          # Pre-clone so we can patch DEPS before gclient reads it (managed=False
+          # then just uses the existing checkout).
+          git init -q .
+          git fetch --depth 1 https://github.com/flutter/flutter.git 4c525dac5ebe5971c5708ef73558ed8edcf4a362
+          git checkout -q FETCH_HEAD
+
+          # Remove the openjdk DEPS entry: download_jdk var is ignored for CIPD deps and
+          # the linux-arm64 package doesn't exist, breaking sync on the arm64 runner.
+          python3 - << 'PY'
+          import re
+          with open('DEPS') as f:
+              deps = f.read()
+          new_deps, n = re.subn(
+              r"^  'engine/src/flutter/third_party/java/openjdk':\s*\{[\s\S]+?^   \},\s*\n",
+              '', deps, flags=re.MULTILINE,
+          )
+          assert n == 1, f"Expected 1 openjdk DEPS entry, found {n}"
+          with open('DEPS', 'w') as f:
+              f.write(new_deps)
+          PY
+
+          # Skip android/emsdk/fuchsia deps (not needed; fuchsia SDK alone is several GB).
+          cat > .gclient << 'EOF'
+          solutions = [
+            {
+              "managed": False,
+              "name": ".",
+              "url": "https://github.com/flutter/flutter.git@4c525dac5ebe5971c5708ef73558ed8edcf4a362",
+              "deps_file": "DEPS",
+              "safesync_url": "",
+              "custom_vars": {
+                "download_android_deps": False,
+                "download_emsdk": False,
+                "download_fuchsia_deps": False,
+              },
+            },
+          ]
+          EOF
+          gclient sync --no-history -D --shallow
+
+          # arm64 requires --target-os=linux --linux-cpu=arm64; without it the gn wrapper
+          # defaults target_cpu=x64 on Linux hosts, producing wrong -march flags.
+          # x64 uses the default host build (out/host_release); arm64 uses out/linux_release_arm64.
+          GN_ARGS="--runtime-mode=release --no-goma"
+          OUT_DIR=host_release
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            GN_ARGS="$GN_ARGS --target-os=linux --linux-cpu=arm64"
+            OUT_DIR=linux_release_arm64
+          fi
+          cd engine/src/flutter
+          python3 tools/gn $GN_ARGS
+          ninja -C ../out/$OUT_DIR libflutter_engine.so gen_snapshot
+
+          echo "=== gen_snapshot candidates in out/$OUT_DIR ==="
+          find ../out/$OUT_DIR -name gen_snapshot -type f | head -10
+
+          ARCH=${{ matrix.arch }}
+          mkdir -p "$GITHUB_WORKSPACE/build/engine-artifacts/$ARCH"
+          cp ../out/$OUT_DIR/libflutter_engine.so \
+             "$GITHUB_WORKSPACE/build/engine-artifacts/$ARCH/libflutter_engine.so"
+
+          GEN_SNAPSHOT_SRC=$(find ../out/$OUT_DIR -name gen_snapshot -type f | head -1)
+          if [ -z "$GEN_SNAPSHOT_SRC" ]; then
+            echo "ERROR: gen_snapshot not found anywhere under out/$OUT_DIR" >&2
+            exit 1
+          fi
+          echo "Copying gen_snapshot from: $GEN_SNAPSHOT_SRC"
+          cp "$GEN_SNAPSHOT_SRC" "$GITHUB_WORKSPACE/build/engine-artifacts/$ARCH/gen_snapshot"
+          chmod +x "$GITHUB_WORKSPACE/build/engine-artifacts/$ARCH/gen_snapshot"
+
+          # Free the source tree; only the .so is needed going forward
+          rm -rf /tmp/engine_src /tmp/depot_tools
+
+      - name: Verify engine artifacts
+        run: |
+          echo "=== Engine artifacts for ${{ matrix.arch }} ==="
+          ls -lh build/engine-artifacts/${{ matrix.arch }}/
+          file build/engine-artifacts/${{ matrix.arch }}/libflutter_engine.so
+          file build/engine-artifacts/${{ matrix.arch }}/gen_snapshot
+
       - name: Build libraries
         run: |
           clickable build --libs --arch ${{ matrix.arch }}
       - name: Build
         run: |
           clickable build --accept-review-warnings --arch ${{ matrix.arch }}
+      - name: Assert libapp.so is product-mode
+        run: |
+          # A non-product snapshot carries "no-dedup_instructions" and aborts at VM init.
+          CLICK=$(find build -name "*.click" 2>/dev/null | head -1)
+          dpkg-deb -x "$CLICK" /tmp/click_inspect
+          LIBAPP=/tmp/click_inspect/lib/libapp.so
+          FEATURES=$(strings -n 10 "$LIBAPP" | grep -E "(product|release) no-code_comments" | head -1)
+          echo "libapp.so features: $FEATURES"
+          if echo "$FEATURES" | grep -q "no-dedup_instructions"; then
+            echo "ERROR: libapp.so was built with a non-product gen_snapshot (no-dedup_instructions)" >&2
+            exit 1
+          fi
+          echo "OK: libapp.so is product-mode (dedup_instructions)"
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: fluffychat.im_${{ env.ARTIFACT_VERSION }}_${{ matrix.arch }}
           path: build/*/app/*.click
