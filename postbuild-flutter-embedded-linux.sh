@@ -7,7 +7,8 @@
 set -e
 
 ENGINE_DIR="${ROOT}/build/engine-artifacts/${ARCH}"
-ZIPS_DIR="${ROOT}/build/elinux-artifact-zips"
+# Per-arch directory so amd64 and arm64 library builds don't overwrite each other.
+ZIPS_DIR="${ROOT}/build/elinux-artifact-zips/${ARCH}"
 mkdir -p "${ZIPS_DIR}"
 
 if [ "${ARCH}" = "amd64" ]; then
@@ -28,8 +29,6 @@ else
 fi
 GEN_SNAPSHOT_SUBDIR="linux-${HOST_FLUTTER_ARCH}"
 
-# gen_snapshot was downloaded by prebuild from the target-arch artifacts.zip.
-# For self-builds (host == target), this is the correct native binary.
 GEN_SNAPSHOT="${ENGINE_DIR}/gen_snapshot"
 if [ ! -f "${GEN_SNAPSHOT}" ]; then
     echo "ERROR: gen_snapshot not found at ${GEN_SNAPSHOT}"

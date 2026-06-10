@@ -1,6 +1,7 @@
 clickable_minimum_required: 7.1.2
 builder: custom
 kill: fluffychat
+skip_review: true
 
 dependencies_host:
 - python3
@@ -14,6 +15,7 @@ dependencies_host:
 - liblzma-dev
 - zip
 - unzip
+- patchelf
 
 dependencies_target:
 - libegl1-mesa-dev
@@ -29,6 +31,7 @@ dependencies_target:
 - wayland-protocols
 - libfontconfig-dev
 - libmaliit-glib-dev
+- libssl-dev
 
 build:
 - ${ROOT}/build.sh
