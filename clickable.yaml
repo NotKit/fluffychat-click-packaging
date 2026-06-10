@@ -33,6 +33,9 @@ dependencies_target:
 - libmaliit-glib-dev
 - libssl-dev
 
+install_lib:
+- /usr/lib/libmaliit-glib.so.*
+
 build:
 - ${ROOT}/build.sh
 
