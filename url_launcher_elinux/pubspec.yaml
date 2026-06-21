@@ -1,0 +1,25 @@
+name: url_launcher_elinux
+description: elinux native backend for url_launcher on Ubuntu Touch (url-dispatcher / GIO).
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: '>=3.19.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      # elinux-only: this package contributes *no* Dart code. The endorsed
+      # `url_launcher_linux` already registers its UrlLauncherLinux Dart side
+      # under Platform.isLinux (which elinux satisfies), so its pigeon
+      # BasicMessageChannels are live — they just have no native handler in an
+      # elinux build (url_launcher_linux's GTK plugin is never compiled for
+      # elinux). This plugin supplies exactly that missing native handler,
+      # speaking the same pigeon channel contract.
+      elinux:
+        pluginClass: UrlLauncherElinuxPlugin

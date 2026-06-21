@@ -77,6 +77,14 @@ if ! grep -q 'content_hub_file_picker' pubspec.yaml; then
     flutter pub add content_hub_file_picker --path="${ROOT}/content_hub_file_picker"
 fi
 
+# Add the elinux url_launcher native backend (elinux-only). It supplies the
+# native handler for url_launcher_linux's pigeon channels, which is otherwise
+# missing on elinux (the GTK url_launcher_linux plugin is never compiled here),
+# so tapping links does nothing. Routes via the Ubuntu Touch URL dispatcher.
+if ! grep -q 'url_launcher_elinux' pubspec.yaml; then
+    flutter pub add url_launcher_elinux --path="${ROOT}/url_launcher_elinux"
+fi
+
 # Get dependencies
 flutter pub get
 
