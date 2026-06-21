@@ -32,9 +32,11 @@ dependencies_target:
 - libfontconfig-dev
 - libmaliit-glib-dev
 - libssl-dev
+- libcontent-hub-glib-dev
 
 install_lib:
 - /usr/lib/libmaliit-glib.so.*
+- /usr/lib/*/libcontent-hub-glib.so.*
 
 build:
 - ${ROOT}/build.sh

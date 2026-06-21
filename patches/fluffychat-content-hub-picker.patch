@@ -1,0 +1,36 @@
+diff --git a/lib/utils/file_selector.dart b/lib/utils/file_selector.dart
+index a4aacc1d..aae58e19 100644
+--- a/lib/utils/file_selector.dart
++++ b/lib/utils/file_selector.dart
+@@ -1,7 +1,6 @@
+ import 'package:file_picker/file_picker.dart';
+ import 'package:file_selector/file_selector.dart';
+ import 'package:fluffychat/widgets/app_lock.dart';
+-import 'package:fluffychat/widgets/future_loading_dialog.dart';
+ import 'package:flutter/widgets.dart';
+ 
+ Future<List<XFile>> selectFiles(
+@@ -10,15 +9,15 @@ Future<List<XFile>> selectFiles(
+   FileType type = FileType.any,
+   bool allowMultiple = false,
+ }) async {
++  // The file picker is itself an interactive UI, so it is not wrapped in a
++  // loading dialog: on Ubuntu Touch the content-hub picker is an in-tree route
++  // that a modal loading dialog would otherwise cover.
+   final result = await AppLock.of(context).pauseWhile(
+-    showFutureLoadingDialog(
+-      context: context,
+-      future: () => FilePicker.platform.pickFiles(
+-        compressionQuality: 0,
+-        allowMultiple: allowMultiple,
+-        type: type,
+-      ),
++    FilePicker.platform.pickFiles(
++      compressionQuality: 0,
++      allowMultiple: allowMultiple,
++      type: type,
+     ),
+   );
+-  return result.result?.xFiles ?? [];
++  return result?.xFiles ?? [];
+ }

@@ -1,0 +1,26 @@
+name: content_hub_file_picker
+description: Ubuntu Touch content-hub file picker — elinux plugin for FluffyChat
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: '>=3.19.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  file_picker: ^10.0.0
+  path: ^1.9.0
+  # content-hub peer icons are usually SVG; Image.memory can't decode those.
+  flutter_svg: ^2.0.0
+
+flutter:
+  plugin:
+    platforms:
+      # linux: drives the Dart-side registrant (registerWith) generation.
+      linux:
+        dartPluginClass: ContentHubFilePickerPlugin
+      # elinux: drives the native plugin build by flutter-elinux.
+      elinux:
+        pluginClass: ContentHubFilePickerPlugin

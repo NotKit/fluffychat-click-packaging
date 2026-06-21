@@ -66,6 +66,17 @@ export PATH="$PATH:$FLUTTER_SDK_PATH/bin"
 FLUFFYCHAT_DIR="${ROOT}/fluffychat"
 cd "$FLUFFYCHAT_DIR"
 
+# Drop the loading dialog around the interactive file picker so the content-hub
+# picker route isn't covered by a modal (idempotent via --forward).
+patch -p1 --forward --reject-file=/dev/null \
+    < "${ROOT}/patches/fluffychat-content-hub-picker.patch" 2>/dev/null || true
+
+# Add content-hub file picker plugin (elinux-only; not in FluffyChat's pubspec).
+# Guard against re-runs: flutter pub add fails if the dep is already present.
+if ! grep -q 'content_hub_file_picker' pubspec.yaml; then
+    flutter pub add content_hub_file_picker --path="${ROOT}/content_hub_file_picker"
+fi
+
 # Get dependencies
 flutter pub get
 
