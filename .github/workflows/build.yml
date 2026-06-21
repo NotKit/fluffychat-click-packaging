@@ -36,7 +36,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/engine-artifacts/${{ matrix.arch }}
-          key: flutter-release-engine-v3-${{ matrix.arch }}-4c525dac5ebe5971c5708ef73558ed8edcf4a362
+          # Both arches now build with fontconfig; the '-fc' suffix busts the old
+          # no-fontconfig cache so the engine actually rebuilds.
+          key: flutter-release-engine-v3-${{ matrix.arch }}-4c525dac5ebe5971c5708ef73558ed8edcf4a362-fc
 
       - name: Cache Rust toolchain + vodozemac build
         uses: actions/cache@v4
@@ -50,6 +52,10 @@ jobs:
       - name: Build Flutter release engine
         if: steps.engine-cache.outputs.cache-hit != 'true'
         run: |
+          # libfontconfig dev headers/lib for the --enable-fontconfig build. The amd64 host
+          # build and the native arm64 runner both link against the runner's system libs.
+          sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
+
           git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git /tmp/depot_tools
           export PATH="/tmp/depot_tools:$PATH"
 
@@ -98,7 +104,11 @@ jobs:
           # arm64 requires --target-os=linux --linux-cpu=arm64; without it the gn wrapper
           # defaults target_cpu=x64 on Linux hosts, producing wrong -march flags.
           # x64 uses the default host build (out/host_release); arm64 uses out/linux_release_arm64.
-          GN_ARGS="--runtime-mode=release --no-goma"
+          # Build Skia's fontconfig font manager into the engine (both arches).
+          # --enable-fontconfig sets skia_use_fontconfig + flutter_use_fontconfig so the
+          # engine resolves system fonts (and glyph fallback) via fontconfig instead of
+          # the bundled DejaVu directory manager.
+          GN_ARGS="--runtime-mode=release --no-goma --enable-fontconfig"
           OUT_DIR=host_release
           if [ "${{ matrix.arch }}" = "arm64" ]; then
             GN_ARGS="$GN_ARGS --target-os=linux --linux-cpu=arm64"
@@ -124,6 +134,23 @@ jobs:
           echo "Copying gen_snapshot from: $GEN_SNAPSHOT_SRC"
           cp "$GEN_SNAPSHOT_SRC" "$GITHUB_WORKSPACE/build/engine-artifacts/$ARCH/gen_snapshot"
           chmod +x "$GITHUB_WORKSPACE/build/engine-artifacts/$ARCH/gen_snapshot"
+
+          # icudtl.dat: ship Flutter's compact ICU data (arch-independent). This used to
+          # survive only via the engine cache; the build step never produced it, so busting
+          # the cache lost it. Source it from the checkout (cwd is engine/src/flutter here).
+          ICU_DAT="third_party/icu/flutter/icudtl.dat"
+          if [ ! -f "$ICU_DAT" ]; then
+            echo "ERROR: icudtl.dat not found at engine/src/flutter/$ICU_DAT" >&2
+            exit 1
+          fi
+          cp "$ICU_DAT" "$GITHUB_WORKSPACE/build/engine-artifacts/$ARCH/icudtl.dat"
+
+          # flutter_embedder.h: the embedder API header (prebuild step copies it into the
+          # embedder source tree for the cmake build). Same latent cache-only gap as icudtl.dat;
+          # it's just embedder.h from the checkout (cwd is engine/src/flutter here).
+          mkdir -p "$GITHUB_WORKSPACE/build/engine-artifacts/$ARCH/include"
+          cp shell/platform/embedder/embedder.h \
+             "$GITHUB_WORKSPACE/build/engine-artifacts/$ARCH/include/flutter_embedder.h"
 
           # Free the source tree; only the .so is needed going forward
           rm -rf /tmp/engine_src /tmp/depot_tools
