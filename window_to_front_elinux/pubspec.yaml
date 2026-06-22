@@ -1,0 +1,28 @@
+name: window_to_front_elinux
+description: elinux native backend (no-op) for window_to_front on Ubuntu Touch.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: '>=3.19.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      # elinux-only: this package contributes *no* Dart code. The upstream
+      # `window_to_front` package provides the Dart `WindowToFront` class, which
+      # calls MethodChannel('window_to_front').invokeMethod('activate'). Its
+      # native side is a GTK `linux` plugin that is never compiled for elinux,
+      # so that channel has no handler and the call throws MissingPluginException
+      # — which aborts flutter_web_auth_2's SSO/OIDC flow right after the login
+      # token is captured. This plugin supplies a no-op native handler for that
+      # channel so the flow completes. (Raising the Wayland surface isn't done:
+      # on Ubuntu Touch the shell / url-dispatcher handles returning focus to the
+      # app, and there's no portable elinux API to raise a window.)
+      elinux:
+        pluginClass: WindowToFrontElinuxPlugin

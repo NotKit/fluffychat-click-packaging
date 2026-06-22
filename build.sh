@@ -85,6 +85,15 @@ if ! grep -q 'url_launcher_elinux' pubspec.yaml; then
     flutter pub add url_launcher_elinux --path="${ROOT}/url_launcher_elinux"
 fi
 
+# Add a no-op elinux backend for window_to_front. flutter_web_auth_2's SSO/OIDC
+# server flow calls WindowToFront.activate() right after capturing the login
+# token; window_to_front's GTK linux plugin isn't compiled for elinux, so that
+# channel would throw MissingPluginException and abort the login. This shim
+# answers the channel as a no-op so the flow completes.
+if ! grep -q 'window_to_front_elinux' pubspec.yaml; then
+    flutter pub add window_to_front_elinux --path="${ROOT}/window_to_front_elinux"
+fi
+
 # Get dependencies
 flutter pub get
 
