@@ -18,8 +18,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: 'true'
+          # Full history so the fluffychat submodule's tags are reachable for
+          # `git describe` below (a shallow checkout has no tags -> empty version).
+          fetch-depth: 0
       - name: Parse version
         run: |
+          # submodule update fetches only the pinned commit, not tags; fetch them
+          # so git describe can name the version.
+          git -C fluffychat fetch --tags --force
           echo ARTIFACT_VERSION=$(cd fluffychat && git describe | awk '{print substr($0,2); }') >> $GITHUB_ENV
       - name: Free disk space
         run: |
