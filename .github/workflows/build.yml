@@ -187,3 +187,47 @@ jobs:
           name: fluffychat.im_${{ env.ARTIFACT_VERSION }}_${{ matrix.arch }}
           path: build/*/app/*.click
           if-no-files-found: error
+
+  # Publish the per-arch .click packages to a rolling "continuous" prerelease so
+  # they can be downloaded without a GitHub login (Actions artifacts require
+  # auth). Mirrors initramfs-tools-halium's use of a continuous tag.
+  release:
+    name: Publish continuous release
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # softprops/action-gh-release updates an existing release's assets but
+      # won't move an existing git tag to the new commit. Delete the old release
+      # and its tag first so "continuous" always points at the latest master
+      # build and stale assets don't linger.
+      - name: Remove previous continuous release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete continuous --cleanup-tag --yes \
+            --repo "$GITHUB_REPOSITORY" || true
+
+      - name: Publish to the continuous release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: continuous
+          target_commitish: ${{ github.sha }}
+          name: Continuous build
+          prerelease: true
+          files: artifacts/**/*.click
+          fail_on_unmatched_files: true
+          body: |
+            Rolling build of the latest `master` commit
+            (${{ github.sha }}), refreshed on every push to `master`.
+
+            Not a stable release. Install the `.click` for your device's
+            architecture with `clickable install` or the OpenStore's local
+            install.
