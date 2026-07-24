@@ -239,3 +239,33 @@ jobs:
             Not a stable release. Install the `.click` for your device's
             architecture with `clickable install` or the OpenStore's local
             install.
+
+  # Publish a permanent, stable release when a v* tag is pushed. The tag names
+  # the release; assets are the same per-arch .click packages the build job
+  # produced for that tagged commit.
+  release-tag:
+    name: Publish tagged release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish release for the tag
+        uses: softprops/action-gh-release@v2
+        with:
+          # tag_name defaults to the pushed tag (github.ref).
+          name: ${{ github.ref_name }}
+          prerelease: false
+          files: artifacts/**/*.click
+          fail_on_unmatched_files: true
+          body: |
+            FluffyChat ${{ github.ref_name }} for Ubuntu Touch.
+
+            Install the `.click` for your device's architecture with
+            `clickable install` or the OpenStore's local install.
