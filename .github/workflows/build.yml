@@ -26,7 +26,9 @@ jobs:
           # submodule update fetches only the pinned commit, not tags; fetch them
           # so git describe can name the version.
           git -C fluffychat fetch --tags --force
-          echo ARTIFACT_VERSION=$(cd fluffychat && git describe | awk '{print substr($0,2); }') >> $GITHUB_ENV
+          # Match only release tags (v*); the commit may also carry an rc* tag
+          # that git describe would otherwise pick, mangling the version.
+          echo ARTIFACT_VERSION=$(cd fluffychat && git describe --tags --match 'v*' | awk '{print substr($0,2); }') >> $GITHUB_ENV
       - name: Free disk space
         run: |
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/local/share/boost \

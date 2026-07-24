@@ -1,8 +1,8 @@
 diff --git a/lib/utils/file_selector.dart b/lib/utils/file_selector.dart
-index a4aacc1d..aae58e19 100644
+index 376df3546..d99e63351 100644
 --- a/lib/utils/file_selector.dart
 +++ b/lib/utils/file_selector.dart
-@@ -1,7 +1,6 @@
+@@ -6,7 +6,6 @@
  import 'package:file_picker/file_picker.dart';
  import 'package:file_selector/file_selector.dart';
  import 'package:fluffychat/widgets/app_lock.dart';
@@ -10,7 +10,7 @@ index a4aacc1d..aae58e19 100644
  import 'package:flutter/widgets.dart';
  
  Future<List<XFile>> selectFiles(
-@@ -10,15 +9,15 @@ Future<List<XFile>> selectFiles(
+@@ -15,24 +14,24 @@ Future<List<XFile>> selectFiles(
    FileType type = FileType.any,
    bool allowMultiple = false,
  }) async {
@@ -20,17 +20,33 @@ index a4aacc1d..aae58e19 100644
    final result = await AppLock.of(context).pauseWhile(
 -    showFutureLoadingDialog(
 -      context: context,
--      future: () => FilePicker.platform.pickFiles(
--        compressionQuality: 0,
--        allowMultiple: allowMultiple,
--        type: type,
--      ),
-+    FilePicker.platform.pickFiles(
-+      compressionQuality: 0,
-+      allowMultiple: allowMultiple,
-+      type: type,
-     ),
+-      future: () async {
+-        if (allowMultiple) {
+-          final result = await FilePicker.pickFiles(
+-            type: type,
+-            dialogTitle: title,
+-          );
+-          return result?.xFiles;
+-        }
+-        final result = await FilePicker.pickFile(
++    () async {
++      if (allowMultiple) {
++        final result = await FilePicker.pickFiles(
+           type: type,
+           dialogTitle: title,
+         );
+-        return [?result?.xFile];
+-      },
+-    ),
++        return result?.xFiles;
++      }
++      final result = await FilePicker.pickFile(
++        type: type,
++        dialogTitle: title,
++      );
++      return [?result?.xFile];
++    }(),
    );
--  return result.result?.xFiles ?? [];
-+  return result?.xFiles ?? [];
+-  return result.result ?? [];
++  return result ?? [];
  }

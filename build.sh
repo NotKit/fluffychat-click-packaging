@@ -136,8 +136,9 @@ sed -i 's/-Wall -Werror/-Wall/' "${FLUFFYCHAT_DIR}/elinux/CMakeLists.txt"
 
 cp -r "build/elinux/${FLUTTER_ARCH}/release/bundle/"* "${INSTALL_DIR}/"
 
-# flutter_webrtc ships libwebrtc.so as a symlink; CMake installs it verbatim so it
-# arrives broken. Resolve and copy the real .so from the pub package cache.
+# Copy the real libwebrtc.so from the pub package cache over the bundled one.
+# Its location moved in flutter_webrtc 1.5.2 (lib/libwebrtc.so) from the older
+# arch-subdir layout (lib/linux-<arch>/libwebrtc.so); try both.
 WEBRTC_REAL="$(python3 -c "
 import json, os, sys
 cfg = json.load(open('.dart_tool/package_config.json'))
@@ -149,8 +150,12 @@ if root.startswith('file://'):
     root = root[7:]
 elif not root.startswith('/'):
     root = os.path.normpath(os.path.join('.dart_tool', root))
-src = os.path.join(root, 'third_party/libwebrtc/lib/linux-${FLUTTER_ARCH}/libwebrtc.so')
-if not os.path.isfile(src):
+candidates = [
+    os.path.join(root, 'third_party/libwebrtc/lib/libwebrtc.so'),
+    os.path.join(root, 'third_party/libwebrtc/lib/linux-${FLUTTER_ARCH}/libwebrtc.so'),
+]
+src = next((c for c in candidates if os.path.isfile(c)), None)
+if not src:
     sys.exit(1)
 print(src)
 " 2>/dev/null)"
@@ -228,7 +233,18 @@ cp "$SQLCIPHER_DIR/libsqlcipher.so" "${INSTALL_DIR}/lib/libsqlcipher.so"
 # Engine has no DT_RUNPATH; patch $ORIGIN so FFI bare-soname dlopens find lib/.
 patchelf --set-rpath '$ORIGIN' "${INSTALL_DIR}/lib/libflutter_engine.so"
 
-# Install packaging metadata
+# Install packaging metadata. Stamp the click version with the upstream
+# FluffyChat version (from pubspec) instead of a fixed 1.0.0; strip the +build
+# suffix so it's a clean Debian upstream version (e.g. 2.8.0).
+FLUFFYCHAT_VERSION="$(grep -m1 '^version:' "${FLUFFYCHAT_DIR}/pubspec.yaml" \
+    | sed -E 's/^version:[[:space:]]*//; s/\+.*//')"
+if [ -z "$FLUFFYCHAT_VERSION" ]; then
+    echo "ERROR: could not parse version from fluffychat/pubspec.yaml" >&2
+    exit 1
+fi
 cp ${ROOT}/manifest.json ${INSTALL_DIR}/manifest.json
+sed -i "s/@FLUFFYCHAT_VERSION@/${FLUFFYCHAT_VERSION}/" ${INSTALL_DIR}/manifest.json
 cp ${ROOT}/fluffychat.{desktop,apparmor} ${INSTALL_DIR}/
-install -D ${FLUFFYCHAT_DIR}/assets/logo.svg ${INSTALL_DIR}/assets/logo.svg
+# logo.svg moved under assets/logo/vector/ in 2.8.0; install to the same
+# destination the desktop file's Icon= still points at.
+install -D ${FLUFFYCHAT_DIR}/assets/logo/vector/logo.svg ${INSTALL_DIR}/assets/logo.svg

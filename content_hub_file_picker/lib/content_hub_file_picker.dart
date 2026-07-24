@@ -23,12 +23,12 @@ class ContentHubFilePickerPlugin {
   // registerWith() calls with a microtask so it wins.
   static void registerWith() {
     scheduleMicrotask(() {
-      FilePicker.platform = ContentHubFilePicker._(_channel);
+      FilePickerPlatform.instance = ContentHubFilePicker._(_channel);
     });
   }
 }
 
-class ContentHubFilePicker extends FilePicker {
+class ContentHubFilePicker extends FilePickerPlatform {
   ContentHubFilePicker._(this._channel);
 
   final MethodChannel _channel;
@@ -40,13 +40,14 @@ class ContentHubFilePicker extends FilePicker {
     FileType type = FileType.any,
     List<String>? allowedExtensions,
     Function(FilePickerStatus)? onFileLoading,
-    bool allowCompression = true,
-    int compressionQuality = 30,
+    int compressionQuality = 0,
     bool allowMultiple = false,
     bool withData = false,
     bool withReadStream = false,
     bool lockParentWindow = false,
     bool readSequential = false,
+    bool cancelUploadOnWindowBlur = true,
+    AndroidSAFOptions? androidSafOptions,
   }) async {
     final contentType = _fileTypeToContentHub(type);
 
@@ -127,11 +128,12 @@ class ContentHubFilePicker extends FilePicker {
   @override
   Future<String?> saveFile({
     String? dialogTitle,
-    String? fileName,
+    required String fileName,
     String? initialDirectory,
     FileType type = FileType.any,
     List<String>? allowedExtensions,
-    Uint8List? bytes,
+    required Uint8List bytes,
+    Function(FilePickerStatus)? onFileLoading,
     bool lockParentWindow = false,
   }) async =>
       null;
@@ -141,14 +143,7 @@ class ContentHubFilePicker extends FilePicker {
     String? dialogTitle,
     bool lockParentWindow = false,
     String? initialDirectory,
-  }) async =>
-      null;
-
-  @override
-  Future<List<String>?> getDirectoryPaths({
-    String? dialogTitle,
-    bool lockParentWindow = false,
-    String? initialDirectory,
+    AndroidSAFOptions? androidSafOptions,
   }) async =>
       null;
 

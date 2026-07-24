@@ -9,7 +9,7 @@
             "desktop":  "fluffychat.desktop"
         }
     },
-    "version": "1.0.0",
+    "version": "@FLUFFYCHAT_VERSION@",
     "maintainer": "Your FullName <email@domain.org>",
     "framework" : "@CLICK_FRAMEWORK@"
 }

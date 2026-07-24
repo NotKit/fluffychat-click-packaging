@@ -10,7 +10,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  file_picker: ^10.0.0
+  file_picker: ^12.0.0-beta.7
   path: ^1.9.0
   # content-hub peer icons are usually SVG; Image.memory can't decode those.
   flutter_svg: ^2.0.0
