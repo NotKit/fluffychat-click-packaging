@@ -13,6 +13,28 @@
 #include "flutter_embedder_options.h"
 #include "flutter_window.h"
 
+// AppArmor only lets a click app write under $HOME/{.local/share,.cache}/<pkg>.
+// path_provider_linux asks GApplication for that name, but there is no
+// GApplication on elinux, so it falls back to the executable name and lands on
+// a denied path. Point the XDG dirs at the confined ones instead.
+static void SetConfinedXdgDirs() {
+  // ubuntu-app-launch exports APP_ID as <pkgname>_<appname>_<version>.
+  const char* app_id = getenv("APP_ID");
+  const char* home = getenv("HOME");
+  if (!app_id || !home) {
+    return;
+  }
+  const std::string package = std::string(app_id).substr(
+      0, std::string(app_id).find('_'));
+  if (package.empty()) {
+    return;
+  }
+  setenv("XDG_DATA_HOME",
+         (std::string(home) + "/.local/share/" + package).c_str(), 1);
+  setenv("XDG_CACHE_HOME", (std::string(home) + "/.cache/" + package).c_str(),
+         1);
+}
+
 int main(int argc, char** argv) {
   FlutterEmbedderOptions options;
   if (!options.Parse(argc, argv)) {
@@ -21,6 +43,8 @@ int main(int argc, char** argv) {
 
   // Ubuntu Touch 16.04 workaround for libhybris/Wayland
   setenv("EGL_PLATFORM", "wayland", 0);
+
+  SetConfinedXdgDirs();
 
   // Creates the Flutter project.
   const auto bundle_path = options.BundlePath();
