@@ -1,8 +1,8 @@
 {
-    "name": "fluffychat.im",
-    "description": "Matrix client",
+    "name": "fluffychat.notkit",
+    "description": "Unofficial FluffyChat Matrix client build using Flutter-eLinux port",
     "architecture": "@CLICK_ARCH@",
-    "title": "FluffyChat",
+    "title": "FluffyChat (Flutter-eLinux)",
     "hooks": {
         "fluffychat": {
             "apparmor": "fluffychat.apparmor",
@@ -10,6 +10,6 @@
         }
     },
     "version": "@FLUFFYCHAT_VERSION@",
-    "maintainer": "Your FullName <email@domain.org>",
+    "maintainer": "TheKit <thekit@disroot.org>",
     "framework" : "@CLICK_FRAMEWORK@"
 }
