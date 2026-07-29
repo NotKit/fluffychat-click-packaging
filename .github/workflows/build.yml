@@ -28,7 +28,10 @@ jobs:
           git -C fluffychat fetch --tags --force
           # Match only release tags (v*); the commit may also carry an rc* tag
           # that git describe would otherwise pick, mangling the version.
-          echo ARTIFACT_VERSION=$(cd fluffychat && git describe --tags --match 'v*' | awk '{print substr($0,2); }') >> $GITHUB_ENV
+          UPSTREAM=$(cd fluffychat && git describe --tags --match 'v*' | awk '{print substr($0,2); }')
+          # Same upstream-plus-packaging-revision version build.sh stamps into
+          # the manifest, so artifact names match the .click version.
+          echo ARTIFACT_VERSION=${UPSTREAM}-$(tr -d '[:space:]' < packaging-revision) >> $GITHUB_ENV
       - name: Free disk space
         run: |
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/local/share/boost \

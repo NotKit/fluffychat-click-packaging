@@ -9,7 +9,7 @@
             "desktop":  "fluffychat.desktop"
         }
     },
-    "version": "@FLUFFYCHAT_VERSION@",
+    "version": "@CLICK_VERSION@",
     "maintainer": "TheKit <thekit@disroot.org>",
     "framework" : "@CLICK_FRAMEWORK@"
 }

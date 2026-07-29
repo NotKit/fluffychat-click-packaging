@@ -235,15 +235,23 @@ patchelf --set-rpath '$ORIGIN' "${INSTALL_DIR}/lib/libflutter_engine.so"
 
 # Install packaging metadata. Stamp the click version with the upstream
 # FluffyChat version (from pubspec) instead of a fixed 1.0.0; strip the +build
-# suffix so it's a clean Debian upstream version (e.g. 2.8.0).
+# suffix so it's a clean Debian upstream version (e.g. 2.8.0). The packaging
+# revision from ./packaging-revision is appended, so packaging-only fixes can
+# ship as 2.8.0-2 without an upstream release.
 FLUFFYCHAT_VERSION="$(grep -m1 '^version:' "${FLUFFYCHAT_DIR}/pubspec.yaml" \
     | sed -E 's/^version:[[:space:]]*//; s/\+.*//')"
 if [ -z "$FLUFFYCHAT_VERSION" ]; then
     echo "ERROR: could not parse version from fluffychat/pubspec.yaml" >&2
     exit 1
 fi
+PACKAGING_REVISION="$(tr -d '[:space:]' < "${ROOT}/packaging-revision")"
+if [ -z "$PACKAGING_REVISION" ]; then
+    echo "ERROR: ./packaging-revision is empty" >&2
+    exit 1
+fi
+CLICK_VERSION="${FLUFFYCHAT_VERSION}-${PACKAGING_REVISION}"
 cp ${ROOT}/manifest.json ${INSTALL_DIR}/manifest.json
-sed -i "s/@FLUFFYCHAT_VERSION@/${FLUFFYCHAT_VERSION}/" ${INSTALL_DIR}/manifest.json
+sed -i "s/@CLICK_VERSION@/${CLICK_VERSION}/" ${INSTALL_DIR}/manifest.json
 cp ${ROOT}/fluffychat.{desktop,apparmor} ${INSTALL_DIR}/
 # logo.svg moved under assets/logo/vector/ in 2.8.0; install to the same
 # destination the desktop file's Icon= still points at.
