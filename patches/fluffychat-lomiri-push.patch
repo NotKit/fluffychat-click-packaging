@@ -1,0 +1,222 @@
+diff --git a/lib/config/app_config.dart b/lib/config/app_config.dart
+index f29bd6d7d..2e2d645c5 100644
+--- a/lib/config/app_config.dart
++++ b/lib/config/app_config.dart
+@@ -18,7 +18,10 @@ abstract class AppConfig {
+   static const String deepLinkPrefix = 'im.fluffychat://chat/';
+   static const String schemePrefix = 'matrix:';
+   static const String pushNotificationsChannelId = 'fluffychat_push';
+-  static const String pushNotificationsAppId = 'chat.fluffy.fluffychat';
++  // Must match the app_id of the click package's push-helper hook: the UBports
++  // Matrix push gateway routes to the device by app_id + pushkey, and
++  // lomiri-push-service dispatches to the helper registered under that id.
++  static const String pushNotificationsAppId = 'fluffychat.notkit_fluffychat';
+   static const double borderRadius = 18.0;
+   static const double spaceBorderRadius = 11.0;
+   static const double columnWidth = 360.0;
+diff --git a/lib/utils/background_push.dart b/lib/utils/background_push.dart
+index 5ead47dbc..17e0bb50c 100644
+--- a/lib/utils/background_push.dart
++++ b/lib/utils/background_push.dart
+@@ -20,6 +20,7 @@ import 'package:fluffychat/widgets/fluffy_chat_app.dart';
+ import 'package:flutter/material.dart';
+ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+ import 'package:http/http.dart' as http;
++import 'package:lomiri_push_client/lomiri_push_client.dart';
+ import 'package:matrix/matrix.dart';
+ import 'package:unifiedpush/unifiedpush.dart';
+ import 'package:unifiedpush_ui/unifiedpush_ui.dart';
+@@ -171,6 +172,13 @@ class BackgroundPush {
+     }
+     final appDisplayName = PlatformInfos.appDisplayName;
+ 
++    // Ubuntu Touch's push helper builds the notification itself from the
++    // gateway payload, so it needs the full one: event_id_only strips
++    // room_name, sender_display_name and content.body, leaving nothing to show.
++    final pusherFormat = PlatformInfos.isLinux
++        ? null
++        : AppSettings.pushNotificationsPusherFormat.value;
++
+     final pushers =
+         await (client.getPushers().catchError((e) {
+           Logs().w('[Push] Unable to request pushers', e);
+@@ -206,8 +214,7 @@ class BackgroundPush {
+           currentPusher.deviceDisplayName == client.deviceName &&
+           currentPusher.lang == 'en' &&
+           currentPusher.data.url.toString() == gatewayUrl &&
+-          currentPusher.data.format ==
+-              AppSettings.pushNotificationsPusherFormat.value &&
++          currentPusher.data.format == pusherFormat &&
+           currentPusher.data.additionalProperties['data_message'] ==
+               pusherDataMessageFormat,
+     )) {
+@@ -241,7 +248,7 @@ class BackgroundPush {
+           lang: 'en',
+           data: PusherData(
+             url: Uri.parse(gatewayUrl),
+-            format: AppSettings.pushNotificationsPusherFormat.value,
++            format: pusherFormat,
+             additionalProperties: {
+               'client_name': client.clientName,
+               'data_message': pusherDataMessageFormat,
+@@ -266,7 +273,11 @@ class BackgroundPush {
+ 
+   Future<void> setupPush() async {
+     final context = matrix?.context;
+-    if (PlatformInfos.isAndroid &&
++    if (PlatformInfos.isLinux) {
++      await _setupLomiriPush();
++      _watchLomiriNotifications();
++      await _handleLomiriLaunchUrl();
++    } else if (PlatformInfos.isAndroid &&
+         (await UnifiedPush.getDistributors()).isNotEmpty &&
+         context != null &&
+         context.mounted) {
+@@ -294,6 +305,11 @@ class BackgroundPush {
+       }
+     }
+ 
++    // flutter_local_notifications has no elinux implementation, so this would
++    // raise MissingPluginException as an unhandled async error. Cold-start
++    // notification taps are handled by _handleLomiriLaunchUrl instead.
++    if (PlatformInfos.isLinux) return;
++
+     // ignore: unawaited_futures
+     _flutterLocalNotificationsPlugin.getNotificationAppLaunchDetails().then((
+       details,
+@@ -316,6 +332,119 @@ class BackgroundPush {
+     });
+   }
+ 
++  String? _lomiriPushToken;
++
++  /// Ubuntu Touch push: lomiri-push-service hands out a token identifying this
++  /// user+device for our click package, and UBports runs a Matrix push gateway
++  /// that relays notifications into the device's push connection. The click's
++  /// push helper turns each payload into a notification, so nothing has to run
++  /// in the background on our side.
++  Future<void> _setupLomiriPush() async {
++    if (matrix == null) return;
++
++    final token = _lomiriPushToken ??= await LomiriPushClient.register();
++    if (token == null) {
++      Logs().w('[Push] Unable to obtain a Lomiri push token');
++      return;
++    }
++    // Info level so this is visible without raising Logs().level; the token
++    // itself is a pushkey, so log only that we have one.
++    Logs().i('[Push] Lomiri push token acquired, registering pusher');
++
++    for (final client in clients) {
++      if (client.onLoginStateChanged.value != LoginState.loggedIn) continue;
++      Logs().d('[Push] SetupPush for Client ${client.clientName}');
++      await setupPusher(
++        client: client,
++        gatewayUrl: LomiriPushClient.gatewayUrl,
++        token: token,
++      );
++    }
++  }
++
++  int _lomiriBadgeCount = -1;
++  final Set<String> _lomiriNotifiedRooms = {};
++  final List<StreamSubscription> _lomiriSubs = [];
++
++  /// The push helper writes the launcher counter and the notification bubbles
++  /// while the app is closed, and has no way to know they were dealt with
++  /// afterwards. Keep both in step with the real unread state instead.
++  void _watchLomiriNotifications() {
++    if (_lomiriSubs.isNotEmpty) return;
++    for (final client in clients) {
++      _lomiriSubs.add(client.onSync.stream.listen((_) => _syncLomiriState()));
++    }
++    _syncLomiriState();
++  }
++
++  Future<void> _syncLomiriState() async {
++    var total = 0;
++    final read = <String>[];
++    for (final client in clients) {
++      for (final room in client.rooms) {
++        final count = room.notificationCount;
++        total += count;
++        if (count > 0) {
++          _lomiriNotifiedRooms.add(room.id);
++        } else if (_lomiriNotifiedRooms.remove(room.id)) {
++          read.add(room.id);
++        }
++      }
++    }
++
++    if (total != _lomiriBadgeCount) {
++      _lomiriBadgeCount = total;
++      await LomiriPushClient.setCounter(total);
++    }
++    // The helper tags each card with its room id, so a read room's bubbles can
++    // be dismissed without touching the others.
++    if (read.isNotEmpty) await LomiriPushClient.clearPersistent(read);
++  }
++
++  /// Handles a notification tap that cold-started the app. The url-dispatcher
++  /// passes the card's `fluffychat://<room_id>` action through the desktop
++  /// file's %U, so it arrives in our argv. Read it from /proc/self/cmdline,
++  /// which needs no extra platform channel.
++  ///
++  /// Only covers a cold start: Lomiri delivers URLs to an already-running app
++  /// over a Qt-only channel that a Flutter app cannot receive, so tapping a
++  /// notification while the app is open just focuses it.
++  Future<void> _handleLomiriLaunchUrl() async {
++    if (_wentToRoomOnStartup) return;
++
++    const prefix = 'fluffychat://';
++    String? roomId;
++    try {
++      final cmdline = await File('/proc/self/cmdline').readAsString();
++      for (final arg in cmdline.split('\x00')) {
++        if (arg.startsWith(prefix) && arg.length > prefix.length) {
++          roomId = arg.substring(prefix.length);
++          break;
++        }
++      }
++    } catch (e) {
++      Logs().w('[Push] Unable to read /proc/self/cmdline', e);
++      return;
++    }
++    if (roomId == null) return;
++
++    Logs().v('[Push] Open room from notification tap', roomId);
++    for (final client in clients) {
++      await client.roomsLoading;
++      await client.accountDataLoading;
++      final room = client.getRoomById(roomId);
++      if (room == null) continue;
++      _wentToRoomOnStartup = true;
++      FluffyChatApp.router.go(
++        room.membership == Membership.invite
++            ? '/rooms?client=${client.clientName}'
++            : '/rooms/$roomId?client=${client.clientName}',
++      );
++      return;
++    }
++    Logs().w('[Push] Room from notification tap not found', roomId);
++  }
++
+   Future<void> _noFcmWarning() async {
+     if (matrix == null) {
+       return;
+diff --git a/lib/widgets/matrix.dart b/lib/widgets/matrix.dart
+index 934de68f5..00664983d 100644
+--- a/lib/widgets/matrix.dart
++++ b/lib/widgets/matrix.dart
+@@ -320,7 +320,10 @@ class MatrixState extends State<Matrix> {
+       _registerSubs(c.clientName);
+     }
+ 
+-    if (PlatformInfos.isMobile) {
++    // Linux is included for Ubuntu Touch, where BackgroundPush drives the
++    // Lomiri push registration. Without this it is never constructed and
++    // chat_list's backgroundPush?.setupPush() is a silent no-op.
++    if (PlatformInfos.isMobile || PlatformInfos.isLinux) {
+       backgroundPush = BackgroundPush(
+         this,
+         onFcmError: (errorMsg, {Uri? link}) async {

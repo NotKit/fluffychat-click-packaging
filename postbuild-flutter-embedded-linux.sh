@@ -13,6 +13,8 @@ mkdir -p "${ZIPS_DIR}"
 
 if [ "${ARCH}" = "amd64" ]; then
     FLUTTER_ARCH="x64"
+elif [ "${ARCH}" = "armhf" ]; then
+    FLUTTER_ARCH="arm"
 else
     FLUTTER_ARCH="arm64"
 fi
@@ -54,7 +56,7 @@ echo "Using embedder lib: ${EMBEDDER_LIB}"
 echo "Packaging elinux artifacts into zip layout for flutter-elinux tool..."
 
 make_arch_zip() {
-    local ARCH_NAME="$1"   # x64 or arm64
+    local ARCH_NAME="$1"   # x64, arm64 or arm
     local MODE="$2"        # release, debug, profile
     local ZIP="${ZIPS_DIR}/elinux-${ARCH_NAME}-${MODE}.zip"
     local TMP
@@ -68,10 +70,10 @@ make_arch_zip() {
     echo "  Created: ${ZIP}"
 }
 
-# flutter-elinux precache unconditionally downloads all 6 arch+mode zips.
+# flutter-elinux precache unconditionally downloads all arch+mode zips.
 # We only build for the target arch; the other arch zips are stubs
 # (same libs reused) and are never used at runtime on the target device.
-for ARCH_NAME in x64 arm64; do
+for ARCH_NAME in x64 arm64 arm; do
     for MODE in release debug profile; do
         make_arch_zip "${ARCH_NAME}" "${MODE}"
     done

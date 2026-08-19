@@ -1,0 +1,20 @@
+diff --git a/packages/flutter_tools/lib/src/base/build.dart b/packages/flutter_tools/lib/src/base/build.dart
+index fa7ffb45..0e555fa8 100644
+--- a/packages/flutter_tools/lib/src/base/build.dart
++++ b/packages/flutter_tools/lib/src/base/build.dart
+@@ -215,11 +215,11 @@ class AOTSnapshotter {
+     }
+ 
+     if (platform == TargetPlatform.android_arm) {
+-      // Use softfp for Android armv7 devices.
+-      // TODO(cbracken): eliminate this when we fix https://github.com/flutter/flutter/issues/17489
+-      genSnapshotArgs.add('--no-sim-use-hardfp');
++      // NOTE: android_arm also stands in for 32-bit ARM Linux (elinux armhf),
++      // which is hard-float — so the softfp flag that belongs here for Android
++      // is deliberately not passed.
+ 
+-      // Not supported by the Pixel in 32-bit mode.
++      // Not supported by the Pixel in 32-bit mode, nor by pre-Cortex-A7 ARMv7.
+       genSnapshotArgs.add('--no-use-integer-division');
+     }
+ 

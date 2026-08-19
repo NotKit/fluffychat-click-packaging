@@ -1,0 +1,21 @@
+name: lomiri_push_client
+description: Lomiri push notification client — elinux plugin for FluffyChat
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: '>=3.19.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      # elinux: drives the native plugin build by flutter-elinux. There is no
+      # linux entry — nothing here overrides a platform interface, so the Dart
+      # side is called directly rather than through a generated registrant.
+      elinux:
+        pluginClass: LomiriPushClientPlugin

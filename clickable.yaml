@@ -51,6 +51,12 @@ libraries:
     - -DCMAKE_BUILD_TYPE=Release
     - -DFLUTTER_RELEASE=ON
     - -DENABLE_ELINUX_EMBEDDER_LOG=OFF
+    # The embedder builds with clang. On armhf clang locates the cross g++ but
+    # resolves its C++ headers to the host's, so the arch-specific
+    # bits/c++config.h is never found. Point at the cross toolchain's own copy.
+    # (Not the sf/ sibling: that one is soft-float.) No-op where the path does
+    # not exist, i.e. on amd64.
+    - -DCMAKE_CXX_FLAGS=-I/usr/${ARCH_TRIPLET}/include/c++/9/${ARCH_TRIPLET}
     dependencies_host:
     - clang
     - zip

@@ -6,6 +6,8 @@ FLUTTER_VERSION="3.44.0"
 FLUTTER_ARCH="$ARCH"
 if [ "$ARCH" == "amd64" ]; then
     FLUTTER_ARCH="x64"
+elif [ "$ARCH" == "armhf" ]; then
+    FLUTTER_ARCH="arm"
 fi
 
 # Flutter SDK (standard Flutter 3.44.0)
@@ -25,11 +27,23 @@ if [ ! -d "$FLUTTER_ELINUX_TOOL_PATH" ]; then
         "$FLUTTER_ELINUX_TOOL_PATH" --depth 1
 fi
 
-# Always ensure the Flutter 3.44.0 compatibility patch is applied (idempotent)
-patch -d "$FLUTTER_ELINUX_TOOL_PATH" -p1 --forward --reject-file=/dev/null \
-    < "${ROOT}/patches/flutter-elinux-flutter-344.patch" 2>/dev/null || true
-
 ELINUX_TOOL_STAMP="$FLUTTER_ELINUX_TOOL_PATH/bin/cache/flutter-elinux.snapshot"
+
+# Always ensure the tool and SDK patches are applied (idempotent). A newly
+# applied patch invalidates the compiled tool snapshot so it gets rebuilt.
+apply_patch() {
+    if patch -d "$1" -p1 --forward --reject-file=/dev/null \
+        < "$2" >/dev/null 2>&1; then
+        rm -f "$ELINUX_TOOL_STAMP"
+    fi
+}
+# Flutter 3.44.0 compatibility
+apply_patch "$FLUTTER_ELINUX_TOOL_PATH" "${ROOT}/patches/flutter-elinux-flutter-344.patch"
+# 32-bit ARM (armhf) target support
+apply_patch "$FLUTTER_ELINUX_TOOL_PATH" "${ROOT}/patches/flutter-elinux-armhf.patch"
+# android_arm stands in for 32-bit ARM Linux in the elinux build; drop its
+# Android-only softfp gen_snapshot flags (UT armhf is hardfp).
+apply_patch "$FLUTTER_SDK_PATH" "${ROOT}/patches/flutter-tools-arm32-hardfp.patch"
 if [ ! -f "$ELINUX_TOOL_STAMP" ]; then
     # Symlink the Flutter SDK into the tool directory (expected by flutter-elinux)
     ln -sfn "$FLUTTER_SDK_PATH" "$FLUTTER_ELINUX_TOOL_PATH/flutter"
@@ -71,6 +85,12 @@ cd "$FLUFFYCHAT_DIR"
 patch -p1 --forward --reject-file=/dev/null \
     < "${ROOT}/patches/fluffychat-content-hub-picker.patch" 2>/dev/null || true
 
+# Register a Matrix pusher against the UBports push gateway using the token
+# from lomiri_push_client, and send the full payload format (not event_id_only)
+# since the click's push helper renders the notification from those fields.
+patch -p1 --forward --reject-file=/dev/null \
+    < "${ROOT}/patches/fluffychat-lomiri-push.patch" 2>/dev/null || true
+
 # Add content-hub file picker plugin (elinux-only; not in FluffyChat's pubspec).
 # Guard against re-runs: flutter pub add fails if the dep is already present.
 if ! grep -q 'content_hub_file_picker' pubspec.yaml; then
@@ -94,8 +114,45 @@ if ! grep -q 'window_to_front_elinux' pubspec.yaml; then
     flutter pub add window_to_front_elinux --path="${ROOT}/window_to_front_elinux"
 fi
 
+# Add the Lomiri push notification client (elinux-only). Registers with
+# lomiri-push-service to get this device's push token, which background_push
+# then hands to the homeserver as the Matrix pushkey.
+if ! grep -q 'lomiri_push_client' pubspec.yaml; then
+    flutter pub add lomiri_push_client --path="${ROOT}/lomiri_push_client"
+fi
+
 # Get dependencies
 flutter pub get
+
+# webrtc-sdk publishes no 32-bit ARM libwebrtc prebuilt, so the flutter_webrtc
+# native plugin cannot link on armhf. Strip its elinux platform entry from the
+# pub-cache pubspec so the plugin registrant and native build skip it; the
+# Dart side stays bundled and calls fail with a missing-plugin error only when
+# (experimental, off by default) VoIP is actually used.
+if [ "$ARCH" == "armhf" ]; then
+    python3 - << 'PY'
+import json, os, re
+cfg = json.load(open('.dart_tool/package_config.json'))
+pkg = next(p for p in cfg['packages'] if p['name'] == 'flutter_webrtc')
+root = pkg['rootUri']
+if root.startswith('file://'):
+    root = root[7:]
+elif not root.startswith('/'):
+    root = os.path.normpath(os.path.join('.dart_tool', root))
+path = os.path.join(root, 'pubspec.yaml')
+with open(path) as f:
+    text = f.read()
+text, n = re.subn(r'\n      elinux:\n(        .*\n)+', '\n', text)
+if n:
+    with open(path, 'w') as f:
+        f.write(text)
+    print('Stripped elinux platform from', path)
+# Assert the invariant rather than the substitution count: the pub cache
+# persists, so a rebuild finds it already stripped (n == 0, still fine).
+if re.search(r'\n      elinux:\n', text):
+    raise SystemExit(f'ERROR: could not strip the elinux platform from {path}')
+PY
+fi
 
 # Copy elinux-specific project files (runner, CMakeLists, etc.)
 cp -rT "${ROOT}/fluffychat-elinux" elinux
@@ -108,16 +165,18 @@ if [ ! -d "$ARCH_ZIPS_DIR" ] || [ ! -f "$ARCH_ZIPS_DIR/elinux-${FLUTTER_ARCH}-re
     exit 1
 fi
 
-# flutter-elinux precache requires all 6 arch+mode zips; stub the other arch
+# flutter-elinux precache requires all arch+mode zips; stub the other arches
 # with copies of the current one (stubs are never executed on the device).
 ZIPS_DIR="${ROOT}/build/elinux-artifact-zips-merged"
 rm -rf "$ZIPS_DIR"
 mkdir -p "$ZIPS_DIR"
 cp "${ARCH_ZIPS_DIR}/"*.zip "${ZIPS_DIR}/"
-OTHER_ARCH="arm64"; [ "${FLUTTER_ARCH}" = "arm64" ] && OTHER_ARCH="x64"
-for MODE in release debug profile; do
-    cp "${ARCH_ZIPS_DIR}/elinux-${FLUTTER_ARCH}-${MODE}.zip" \
-       "${ZIPS_DIR}/elinux-${OTHER_ARCH}-${MODE}.zip"
+for OTHER_ARCH in x64 arm64 arm; do
+    [ "${OTHER_ARCH}" = "${FLUTTER_ARCH}" ] && continue
+    for MODE in release debug profile; do
+        cp "${ARCH_ZIPS_DIR}/elinux-${FLUTTER_ARCH}-${MODE}.zip" \
+           "${ZIPS_DIR}/elinux-${OTHER_ARCH}-${MODE}.zip"
+    done
 done
 export ELINUX_ENGINE_BASE_LOCAL_DIRECTORY="$ZIPS_DIR"
 
@@ -139,6 +198,8 @@ cp -r "build/elinux/${FLUTTER_ARCH}/release/bundle/"* "${INSTALL_DIR}/"
 # Copy the real libwebrtc.so from the pub package cache over the bundled one.
 # Its location moved in flutter_webrtc 1.5.2 (lib/libwebrtc.so) from the older
 # arch-subdir layout (lib/linux-<arch>/libwebrtc.so); try both.
+# armhf has no libwebrtc prebuilt and builds without the webrtc plugin.
+if [ "$ARCH" != "armhf" ]; then
 WEBRTC_REAL="$(python3 -c "
 import json, os, sys
 cfg = json.load(open('.dart_tool/package_config.json'))
@@ -164,6 +225,7 @@ if [ -z "$WEBRTC_REAL" ]; then
     exit 1
 fi
 cp --remove-destination "$WEBRTC_REAL" "${INSTALL_DIR}/lib/libwebrtc.so"
+fi
 
 # flutter_vodozemac declares only a `linux` ffiPlugin (not `elinux`), so flutter-elinux
 # never builds or bundles libvodozemac_bindings_dart.so. flutter_rust_bridge opens it via
@@ -198,9 +260,25 @@ fi
 # Ensure a default toolchain: a cached rustup dir may have proxies but no configured default.
 rustup default stable
 
+# Build for an explicit target triple ($ARCH_RUST comes from clickable): cross
+# containers (armhf, local arm64) are amd64 hosts with a cross gcc in $CC, where
+# a bare `cargo build` would compile for the host triple while cc-rs shells out
+# to the cross compiler.
+RUST_TARGET="${ARCH_RUST:-}"
+if [ -z "$RUST_TARGET" ]; then
+    echo "ERROR: ARCH_RUST is not set; clickable should provide it" >&2
+    exit 1
+fi
+rustup target add "$RUST_TARGET"
+if [ -n "${CC:-}" ]; then
+    RUST_TARGET_ENV="$(echo "$RUST_TARGET" | tr '[:lower:]-' '[:upper:]_')"
+    export "CARGO_TARGET_${RUST_TARGET_ENV}_LINKER=$CC"
+fi
+
 CARGO_TARGET_DIR="${ROOT}/build/vodozemac-target" \
-    cargo build --release --manifest-path "${VODOZEMAC_RUST}/Cargo.toml"
-cp "${ROOT}/build/vodozemac-target/release/libvodozemac_bindings_dart.so" \
+    cargo build --release --target "$RUST_TARGET" \
+    --manifest-path "${VODOZEMAC_RUST}/Cargo.toml"
+cp "${ROOT}/build/vodozemac-target/${RUST_TARGET}/release/libvodozemac_bindings_dart.so" \
    "${INSTALL_DIR}/libvodozemac_bindings_dart.so"
 
 # sqlcipher_flutter_libs is a linux-only plugin, skipped by flutter-elinux. Build the
@@ -253,6 +331,16 @@ CLICK_VERSION="${FLUFFYCHAT_VERSION}-${PACKAGING_REVISION}"
 cp ${ROOT}/manifest.json ${INSTALL_DIR}/manifest.json
 sed -i "s/@CLICK_VERSION@/${CLICK_VERSION}/" ${INSTALL_DIR}/manifest.json
 cp ${ROOT}/fluffychat.{desktop,apparmor} ${INSTALL_DIR}/
+cp ${ROOT}/url-dispatcher.json ${INSTALL_DIR}/
+
+# Push helper: lomiri-push-service execs this with an input and an output file
+# to turn a Matrix push gateway payload into a notification. It is a plain
+# standalone binary — no Flutter, no Qt — so build it directly here rather than
+# through the Flutter toolchain. "exec" in push.json is relative to this dir.
+mkdir -p ${INSTALL_DIR}/push
+${CXX:-c++} -std=c++11 -O2 -s -I ${ROOT}/push ${ROOT}/push/push.cpp \
+    -o ${INSTALL_DIR}/push/push
+cp ${ROOT}/push/push.json ${ROOT}/push/push-apparmor.json ${INSTALL_DIR}/push/
 # logo.svg moved under assets/logo/vector/ in 2.8.0; install to the same
 # destination the desktop file's Icon= still points at.
 install -D ${FLUFFYCHAT_DIR}/assets/logo/vector/logo.svg ${INSTALL_DIR}/assets/logo.svg

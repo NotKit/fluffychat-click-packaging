@@ -6,13 +6,27 @@ on:
 jobs:
   build:
     strategy:
+      # Keep one arch building when the other's runner breaks, so a flaky
+      # container runtime on one image doesn't cancel the other's artifact.
+      fail-fast: false
       matrix:
         include:
           - arch: amd64
-            runner: ubuntu-latest
+            # Pinned: ubuntu-latest ships a podman/crun combo that fails to
+            # start any container ("unknown version specified").
+            runner: ubuntu-24.04
           - arch: arm64
             runner: ubuntu-22.04-arm
+          - arch: armhf
+            # No 32-bit ARM runner exists; this is a cross build from amd64.
+            runner: ubuntu-24.04
     runs-on: ${{ matrix.runner }}
+    env:
+      # One definition for both the restore and the save below: if the two keys
+      # ever drifted apart the cache would silently never hit.
+      # Both arches now build with fontconfig; the '-fc' suffix busts the old
+      # no-fontconfig cache so the engine actually rebuilds.
+      ENGINE_CACHE_KEY: flutter-release-engine-v3-${{ matrix.arch }}-4c525dac5ebe5971c5708ef73558ed8edcf4a362-fc
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -42,14 +56,15 @@ jobs:
         run: |
           python3 -m pip install clickable-ut
 
+      # restore/save rather than actions/cache: that one only saves in its post
+      # step, which is skipped when the job fails, so a later failure would throw
+      # away a good engine build and make the next run redo the whole thing.
       - name: Restore Flutter release engine cache
         id: engine-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: build/engine-artifacts/${{ matrix.arch }}
-          # Both arches now build with fontconfig; the '-fc' suffix busts the old
-          # no-fontconfig cache so the engine actually rebuilds.
-          key: flutter-release-engine-v3-${{ matrix.arch }}-4c525dac5ebe5971c5708ef73558ed8edcf4a362-fc
+          key: ${{ env.ENGINE_CACHE_KEY }}
 
       - name: Cache Rust toolchain + vodozemac build
         uses: actions/cache@v4
@@ -64,7 +79,8 @@ jobs:
         if: steps.engine-cache.outputs.cache-hit != 'true'
         run: |
           # libfontconfig dev headers/lib for the --enable-fontconfig build. The amd64 host
-          # build and the native arm64 runner both link against the runner's system libs.
+          # build and the native arm64 runner both link against the runner's system libs;
+          # the armhf cross build takes fontconfig from its target sysroot instead.
           sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
 
           git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git /tmp/depot_tools
@@ -80,7 +96,9 @@ jobs:
 
           # Remove the openjdk DEPS entry: download_jdk var is ignored for CIPD deps and
           # the linux-arm64 package doesn't exist, breaking sync on the arm64 runner.
-          python3 - << 'PY'
+          # System interpreter: depot_tools' python3 shim shadows it on PATH but
+          # only works after gclient sync has bootstrapped depot_tools below.
+          /usr/bin/python3 - << 'PY'
           import re
           with open('DEPS') as f:
               deps = f.read()
@@ -112,10 +130,10 @@ jobs:
           EOF
           gclient sync --no-history -D --shallow
 
-          # arm64 requires --target-os=linux --linux-cpu=arm64; without it the gn wrapper
+          # arm64/arm require --target-os=linux --linux-cpu=...; without it the gn wrapper
           # defaults target_cpu=x64 on Linux hosts, producing wrong -march flags.
           # x64 uses the default host build (out/host_release); arm64 uses out/linux_release_arm64.
-          # Build Skia's fontconfig font manager into the engine (both arches).
+          # Build Skia's fontconfig font manager into the engine (all arches).
           # --enable-fontconfig sets skia_use_fontconfig + flutter_use_fontconfig so the
           # engine resolves system fonts (and glyph fallback) via fontconfig instead of
           # the bundled DejaVu directory manager.
@@ -124,10 +142,36 @@ jobs:
           if [ "${{ matrix.arch }}" = "arm64" ]; then
             GN_ARGS="$GN_ARGS --target-os=linux --linux-cpu=arm64"
             OUT_DIR=linux_release_arm64
+          elif [ "${{ matrix.arch }}" = "armhf" ]; then
+            # Cross build from amd64. This engine version has no default arm32
+            # sysroot in sysroot.gni (only x64/arm64/riscv64), but the Debian
+            # bullseye armhf sysroot is still published in sysroots.json, so
+            # install it and pass it explicitly. UT armhf userland is hard-float.
+            python3 engine/src/build/linux/sysroot_scripts/install-sysroot.py --arch=arm
+            SYSROOT=$(ls -d "$PWD"/engine/src/build/linux/debian_*armhf*sysroot* | head -1)
+            if [ -z "$SYSROOT" ]; then
+              echo "ERROR: armhf sysroot did not install" >&2
+              exit 1
+            fi
+            # The engine only emits a clang --target= for arm64, so an arm build
+            # would compile ARM flags against the x86_64 host triple.
+            patch -d engine/src -p1 \
+              < "$GITHUB_WORKSPACE/patches/engine-linux-arm-triple.patch"
+
+            GN_ARGS="$GN_ARGS --target-os=linux --linux-cpu=arm --arm-float-abi=hard --target-sysroot $SYSROOT"
+            OUT_DIR=linux_release_arm
           fi
           cd engine/src/flutter
           python3 tools/gn $GN_ARGS
-          ninja -C ../out/$OUT_DIR libflutter_engine.so gen_snapshot
+          if [ "${{ matrix.arch }}" = "armhf" ]; then
+            # Cross build: gen_snapshot has to run on the x64 build host, so take
+            # it from the clang_x64 secondary toolchain. No fallback to the
+            # default-toolchain target — that one is an ARM binary the host
+            # cannot execute, and copying it would poison the engine cache.
+            ninja -C ../out/$OUT_DIR libflutter_engine.so clang_x64/gen_snapshot
+          else
+            ninja -C ../out/$OUT_DIR libflutter_engine.so gen_snapshot
+          fi
 
           echo "=== gen_snapshot candidates in out/$OUT_DIR ==="
           find ../out/$OUT_DIR -name gen_snapshot -type f | head -10
@@ -137,7 +181,12 @@ jobs:
           cp ../out/$OUT_DIR/libflutter_engine.so \
              "$GITHUB_WORKSPACE/build/engine-artifacts/$ARCH/libflutter_engine.so"
 
-          GEN_SNAPSHOT_SRC=$(find ../out/$OUT_DIR -name gen_snapshot -type f | head -1)
+          # Prefer the clang_x64 (build-host) gen_snapshot: in a cross build the
+          # default-toolchain one is a target-arch binary the host cannot run.
+          GEN_SNAPSHOT_SRC=$(find ../out/$OUT_DIR -path '*clang_x64*' -name gen_snapshot -type f | head -1)
+          if [ -z "$GEN_SNAPSHOT_SRC" ]; then
+            GEN_SNAPSHOT_SRC=$(find ../out/$OUT_DIR -name gen_snapshot -type f | head -1)
+          fi
           if [ -z "$GEN_SNAPSHOT_SRC" ]; then
             echo "ERROR: gen_snapshot not found anywhere under out/$OUT_DIR" >&2
             exit 1
@@ -166,12 +215,37 @@ jobs:
           # Free the source tree; only the .so is needed going forward
           rm -rf /tmp/engine_src /tmp/depot_tools
 
+      # Placed right after the build so a failure further down the job (app
+      # build, packaging) still leaves the engine cached for the next run.
+      - name: Save Flutter release engine cache
+        if: steps.engine-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: build/engine-artifacts/${{ matrix.arch }}
+          key: ${{ env.ENGINE_CACHE_KEY }}
+
       - name: Verify engine artifacts
         run: |
+          DIR=build/engine-artifacts/${{ matrix.arch }}
           echo "=== Engine artifacts for ${{ matrix.arch }} ==="
-          ls -lh build/engine-artifacts/${{ matrix.arch }}/
-          file build/engine-artifacts/${{ matrix.arch }}/libflutter_engine.so
-          file build/engine-artifacts/${{ matrix.arch }}/gen_snapshot
+          ls -lh $DIR/
+          file $DIR/libflutter_engine.so
+          file $DIR/gen_snapshot
+
+          # Assert the arches, so a restored-from-cache or mis-toolchained
+          # artifact fails here instead of deep in the app build. The engine is
+          # a target binary; gen_snapshot must run on this runner.
+          case ${{ matrix.arch }} in
+            amd64) ENGINE_ARCH="x86-64" ;;
+            arm64) ENGINE_ARCH="ARM aarch64" ;;
+            armhf) ENGINE_ARCH="ARM," ;;
+          esac
+          HOST_ARCH=$(file -b "$(command -v file)" | grep -o 'x86-64\|ARM aarch64')
+          file -b $DIR/libflutter_engine.so | grep -q "$ENGINE_ARCH" || {
+            echo "ERROR: libflutter_engine.so is not $ENGINE_ARCH" >&2; exit 1; }
+          file -b $DIR/gen_snapshot | grep -q "$HOST_ARCH" || {
+            echo "ERROR: gen_snapshot is not runnable on this $HOST_ARCH host" >&2; exit 1; }
+          echo "OK: engine is $ENGINE_ARCH, gen_snapshot is host ($HOST_ARCH)"
 
       - name: Build libraries
         run: |

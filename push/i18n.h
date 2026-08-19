@@ -2,9 +2,9 @@
 
 #include <libintl.h>
 
-#include <QString>
+#include <string>
 
-const QString GETTEXT_DOMAIN = "cinny.nitanmarcel";
+const std::string GETTEXT_DOMAIN = "fluffychat.notkit";
 
 #define _(value) gettext(value)
 #define N_(value) gettext(value)

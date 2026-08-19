@@ -6,7 +6,12 @@
     "hooks": {
         "fluffychat": {
             "apparmor": "fluffychat.apparmor",
-            "desktop":  "fluffychat.desktop"
+            "desktop":  "fluffychat.desktop",
+            "urls": "url-dispatcher.json"
+        },
+        "push": {
+            "apparmor": "push/push-apparmor.json",
+            "push-helper": "push/push.json"
         }
     },
     "version": "@CLICK_VERSION@",

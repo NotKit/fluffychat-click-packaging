@@ -1,0 +1,139 @@
+--- a/lib/commands/build.dart
++++ b/lib/commands/build.dart
+@@ -55,7 +55,7 @@
+     argParser.addOption(
+       'target-arch',
+       defaultsTo: _getCurrentHostPlatformArchName(),
+-      allowed: <String>['x64', 'arm64'],
++      allowed: <String>['x64', 'arm64', 'arm'],
+       help: 'Target architecture for which the app is compiled',
+     );
+     argParser.addOption(
+--- a/lib/elinux_build_target.dart
++++ b/lib/elinux_build_target.dart
+@@ -7,6 +7,7 @@
+ import 'dart:io';
+ 
+ import 'package:flutter_tools/src/artifacts.dart';
++import 'package:flutter_tools/src/base/build.dart';
+ import 'package:flutter_tools/src/base/common.dart';
+ import 'package:flutter_tools/src/base/file_system.dart';
+ import 'package:flutter_tools/src/base/os.dart';
+@@ -147,7 +148,12 @@
+         ...super.dependencies,
+         ELinuxAotElf(buildInfo.targetArch == 'arm64'
+             ? TargetPlatform.linux_arm64
+-            : TargetPlatform.linux_x64),
++            // There is no linux_arm TargetPlatform; android_arm selects the
++            // 32-bit ARM gen_snapshot (see ELinuxArtifacts) without affecting
++            // the kernel step, which still builds with a linux target OS.
++            : buildInfo.targetArch == 'arm'
++                ? TargetPlatform.android_arm
++                : TargetPlatform.linux_x64),
+         ELinuxPlugins(buildInfo),
+       ];
+ }
+@@ -218,6 +224,51 @@
+       ];
+ 
+   final TargetPlatform targetPlatform;
++
++  /// Same as [AotElfBase.build], but takes the gen_snapshot platform from
++  /// [targetPlatform] instead of the kTargetPlatform define. The define must
++  /// stay a linux platform so the kernel step does not const-fold
++  /// Platform.isAndroid to true when targeting 32-bit ARM (android_arm).
++  @override
++  Future<void> build(Environment environment) async {
++    final AOTSnapshotter snapshotter = AOTSnapshotter(
++      fileSystem: environment.fileSystem,
++      logger: environment.logger,
++      xcode: globals.xcode!,
++      processManager: environment.processManager,
++      artifacts: environment.artifacts,
++    );
++    final String outputPath = environment.buildDir.path;
++    final String? buildModeEnvironment = environment.defines[kBuildMode];
++    if (buildModeEnvironment == null) {
++      throw MissingDefineException(kBuildMode, 'aot_elf');
++    }
++    final List<String> extraGenSnapshotOptions = decodeCommaSeparated(
++      environment.defines,
++      kExtraGenSnapshotOptions,
++    );
++    // The android_arm branch of AOTSnapshotter skips --strip (AGP would strip
++    // there); request it explicitly so the elinux libapp.so is stripped.
++    if (targetPlatform == TargetPlatform.android_arm) {
++      extraGenSnapshotOptions.add('--strip');
++    }
++    final BuildMode buildMode = BuildMode.fromCliName(buildModeEnvironment);
++    final String? splitDebugInfo = environment.defines[kSplitDebugInfo];
++    final bool dartObfuscation = environment.defines[kDartObfuscation] == 'true';
++
++    final int snapshotExitCode = await snapshotter.build(
++      platform: targetPlatform,
++      buildMode: buildMode,
++      mainPath: environment.buildDir.childFile('app.dill').path,
++      outputPath: outputPath,
++      extraGenSnapshotOptions: extraGenSnapshotOptions,
++      splitDebugInfo: splitDebugInfo,
++      dartObfuscation: dartObfuscation,
++    );
++    if (snapshotExitCode != 0) {
++      throw Exception('AOT snapshotter exited with code $snapshotExitCode');
++    }
++  }
+ }
+ 
+ class NativeBundle {
+@@ -341,7 +392,11 @@
+ 
+     // Run the native build.
+     final String cmakeBuildType = buildMode.isPrecompiled ? 'Release' : 'Debug';
+-    final String targetArch = buildInfo!.targetArch == 'arm64' ? 'aarch64' : 'x86_64';
++    final String targetArch = buildInfo!.targetArch == 'arm64'
++        ? 'aarch64'
++        : buildInfo!.targetArch == 'arm'
++            ? 'armv7l'
++            : 'x86_64';
+     final String hostArch = _getCurrentHostPlatformArchName();
+     final String? targetCompilerTriple = buildInfo!.targetCompilerTriple;
+     final String targetSysroot = buildInfo!.targetSysroot;
+--- a/lib/elinux_artifacts.dart
++++ b/lib/elinux_artifacts.dart
+@@ -36,11 +36,14 @@
+ 
+     // Use elinux-*-*/linux-x64/gen_snapshot only when the host pc is x64 arch.
+     // Also handle linux_arm64 hosts for self-builds on arm64 machines.
++    // android_arm stands in for 32-bit ARM Linux, which has no TargetPlatform
++    // of its own; route it to the elinux-arm engine artifacts as well.
+     if (artifact == Artifact.genSnapshot &&
+         (hostPlatform == HostPlatform.linux_x64 ||
+             hostPlatform == HostPlatform.linux_arm64) &&
+         platform != null &&
+-        getNameForTargetPlatform(platform).startsWith('linux')) {
++        (getNameForTargetPlatform(platform).startsWith('linux') ||
++            platform == TargetPlatform.android_arm)) {
+       assert(mode != null, 'Need to specify a build mode.');
+       assert(mode != BuildMode.debug, 'Artifact $artifact only available in non-debug mode.');
+ 
+@@ -56,6 +59,8 @@
+   String _getArchForTargetPlatform(TargetPlatform platform) {
+     if (platform == TargetPlatform.linux_x64) {
+       return 'x64';
++    } else if (platform == TargetPlatform.android_arm) {
++      return 'arm';
+     } else {
+       return 'arm64';
+     }
+--- a/lib/elinux_cache.dart
++++ b/lib/elinux_cache.dart
+@@ -113,6 +113,9 @@
+   @override
+   List<List<String>> getBinaryDirs() => <List<String>>[
+         <String>['elinux-common', 'elinux-common.zip'],
++        <String>['elinux-arm-debug', 'elinux-arm-debug.zip'],
++        <String>['elinux-arm-profile', 'elinux-arm-profile.zip'],
++        <String>['elinux-arm-release', 'elinux-arm-release.zip'],
+         <String>['elinux-arm64-debug', 'elinux-arm64-debug.zip'],
+         <String>['elinux-arm64-profile', 'elinux-arm64-profile.zip'],
+         <String>['elinux-arm64-release', 'elinux-arm64-release.zip'],
