@@ -15,7 +15,7 @@ index f29bd6d7d..2e2d645c5 100644
    static const double spaceBorderRadius = 11.0;
    static const double columnWidth = 360.0;
 diff --git a/lib/utils/background_push.dart b/lib/utils/background_push.dart
-index 5ead47dbc..17e0bb50c 100644
+index 8c1d1cbc9..fa27e7713 100644
 --- a/lib/utils/background_push.dart
 +++ b/lib/utils/background_push.dart
 @@ -20,6 +20,7 @@ import 'package:fluffychat/widgets/fluffy_chat_app.dart';
@@ -26,7 +26,7 @@ index 5ead47dbc..17e0bb50c 100644
  import 'package:matrix/matrix.dart';
  import 'package:unifiedpush/unifiedpush.dart';
  import 'package:unifiedpush_ui/unifiedpush_ui.dart';
-@@ -171,6 +172,13 @@ class BackgroundPush {
+@@ -173,6 +174,13 @@ class BackgroundPush {
      }
      final appDisplayName = PlatformInfos.appDisplayName;
  
@@ -40,7 +40,21 @@ index 5ead47dbc..17e0bb50c 100644
      final pushers =
          await (client.getPushers().catchError((e) {
            Logs().w('[Push] Unable to request pushers', e);
-@@ -206,8 +214,7 @@ class BackgroundPush {
+@@ -186,7 +194,12 @@ class BackgroundPush {
+     if (deviceAppId.length > 64) {
+       deviceAppId = deviceAppId.substring(0, 64);
+     }
+-    final thisAppId = deviceAppId;
++    // lomiri-push-service dispatches to the click's push helper by app_id, so
++    // on Ubuntu Touch the pusher has to carry the plain one, without the
++    // per-device suffix.
++    final thisAppId = PlatformInfos.isLinux
++        ? AppConfig.pushNotificationsAppId
++        : deviceAppId;
+     if (gatewayUrl == null || token == null) {
+       Logs().w('[Push] Missing required push credentials');
+       return;
+@@ -203,8 +216,7 @@ class BackgroundPush {
            currentPusher.deviceDisplayName == client.deviceName &&
            currentPusher.lang == 'en' &&
            currentPusher.data.url.toString() == gatewayUrl &&
@@ -50,7 +64,7 @@ index 5ead47dbc..17e0bb50c 100644
            currentPusher.data.additionalProperties['data_message'] ==
                pusherDataMessageFormat,
      )) {
-@@ -241,7 +248,7 @@ class BackgroundPush {
+@@ -244,7 +256,7 @@ class BackgroundPush {
            lang: 'en',
            data: PusherData(
              url: Uri.parse(gatewayUrl),
@@ -59,10 +73,10 @@ index 5ead47dbc..17e0bb50c 100644
              additionalProperties: {
                'client_name': client.clientName,
                'data_message': pusherDataMessageFormat,
-@@ -266,7 +273,11 @@ class BackgroundPush {
+@@ -264,7 +276,11 @@ class BackgroundPush {
+   static bool _wentToRoomOnStartup = false;
  
-   Future<void> setupPush() async {
-     final context = matrix?.context;
+   Future<void> setupPush(BuildContext context) async {
 -    if (PlatformInfos.isAndroid &&
 +    if (PlatformInfos.isLinux) {
 +      await _setupLomiriPush();
@@ -70,9 +84,9 @@ index 5ead47dbc..17e0bb50c 100644
 +      await _handleLomiriLaunchUrl();
 +    } else if (PlatformInfos.isAndroid &&
          (await UnifiedPush.getDistributors()).isNotEmpty &&
-         context != null &&
          context.mounted) {
-@@ -294,6 +305,11 @@ class BackgroundPush {
+       await UnifiedPushUi(
+@@ -291,6 +307,11 @@ class BackgroundPush {
        }
      }
  
@@ -84,7 +98,7 @@ index 5ead47dbc..17e0bb50c 100644
      // ignore: unawaited_futures
      _flutterLocalNotificationsPlugin.getNotificationAppLaunchDetails().then((
        details,
-@@ -316,6 +332,119 @@ class BackgroundPush {
+@@ -313,6 +334,119 @@ class BackgroundPush {
      });
    }
  

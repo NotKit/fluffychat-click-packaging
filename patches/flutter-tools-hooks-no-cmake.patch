@@ -1,0 +1,24 @@
+Do not require a CMake app build for build hooks on Linux
+
+flutter-elinux has its own build system, so the CMakeCache.txt the
+compiler config is read from never exists and every build with hooks
+fails. Fall back to letting hooks resolve their own compiler, as
+Flutter already does for widget tests.
+
+diff --git a/packages/flutter_tools/lib/src/isolated/native_assets/linux/native_assets.dart b/packages/flutter_tools/lib/src/isolated/native_assets/linux/native_assets.dart
+--- a/packages/flutter_tools/lib/src/isolated/native_assets/linux/native_assets.dart
++++ b/packages/flutter_tools/lib/src/isolated/native_assets/linux/native_assets.dart
+@@ -27,9 +27,10 @@
+   // For app builds, use the same compiler as the native/GTK parts of the app.
+   final File cmakeCacheTxt = cmakeDirectory.childFile('CMakeCache.txt');
+   if (!cmakeCacheTxt.existsSync()) {
+-    throwToolExit(
+-      'Could not read compiler configurations for build hooks, expected ${cmakeCacheTxt.path} to exist.',
+-    );
++    // Embedders that do not drive the app's native build through Flutter's
++    // CMake project (flutter-elinux) have no cache to read. Treat it like the
++    // widget test case above and let hooks resolve a compiler themselves.
++    return null;
+   }
+ 
+   const archiverVariable = 'CMAKE_AR';

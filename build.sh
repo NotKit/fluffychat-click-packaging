@@ -41,9 +41,13 @@ apply_patch() {
 apply_patch "$FLUTTER_ELINUX_TOOL_PATH" "${ROOT}/patches/flutter-elinux-flutter-344.patch"
 # 32-bit ARM (armhf) target support
 apply_patch "$FLUTTER_ELINUX_TOOL_PATH" "${ROOT}/patches/flutter-elinux-armhf.patch"
+# Run the packages' Dart build hooks (package:sqlite3 needs them)
+apply_patch "$FLUTTER_ELINUX_TOOL_PATH" "${ROOT}/patches/flutter-elinux-native-assets.patch"
 # android_arm stands in for 32-bit ARM Linux in the elinux build; drop its
 # Android-only softfp gen_snapshot flags (UT armhf is hardfp).
 apply_patch "$FLUTTER_SDK_PATH" "${ROOT}/patches/flutter-tools-arm32-hardfp.patch"
+# Build hooks: no CMake app build to read a compiler config from
+apply_patch "$FLUTTER_SDK_PATH" "${ROOT}/patches/flutter-tools-hooks-no-cmake.patch"
 if [ ! -f "$ELINUX_TOOL_STAMP" ]; then
     # Symlink the Flutter SDK into the tool directory (expected by flutter-elinux)
     ln -sfn "$FLUTTER_SDK_PATH" "$FLUTTER_ELINUX_TOOL_PATH/flutter"
@@ -90,6 +94,26 @@ patch -p1 --forward --reject-file=/dev/null \
 # since the click's push helper renders the notification from those fields.
 patch -p1 --forward --reject-file=/dev/null \
     < "${ROOT}/patches/fluffychat-lomiri-push.patch" 2>/dev/null || true
+
+# package:sqlite3 no longer dlopens by name: it declares a native asset built by
+# its own hook, which by default downloads a prebuilt SQLCipher for the target.
+# Point it at the system instead, so it resolves libsqlcipher.so - the one this
+# script builds and installs below - through a plain dlopen.
+python3 - << 'PY'
+path = 'pubspec.yaml'
+with open(path) as f:
+    text = f.read()
+want = "    sqlite3:\n      source: system\n      name: sqlcipher\n"
+have = "    sqlite3:\n      source: sqlcipher\n"
+if want not in text:
+    if have not in text:
+        raise SystemExit(
+            'ERROR: the sqlite3 hook user_defines block in pubspec.yaml is not '
+            'what this script expects; check what upstream changed'
+        )
+    with open(path, 'w') as f:
+        f.write(text.replace(have, want))
+PY
 
 # Add content-hub file picker plugin (elinux-only; not in FluffyChat's pubspec).
 # Guard against re-runs: flutter pub add fails if the dep is already present.
@@ -194,6 +218,43 @@ sed -i 's/-Wall -Werror/-Wall/' "${FLUFFYCHAT_DIR}/elinux/CMakeLists.txt"
 "$FLUTTER_ELINUX_BIN" build elinux --release --target-arch=${FLUTTER_ARCH}
 
 cp -r "build/elinux/${FLUTTER_ARCH}/release/bundle/"* "${INSTALL_DIR}/"
+
+# Code assets from the packages' build hooks land beside the bundle, not in it.
+# Put them with the other libraries, where the bare-soname dlopen the manifest
+# asks for will find them (the engine's rpath is $ORIGIN).
+if [ "$ARCH" != "armhf" ] && compgen -G "build/elinux/native_assets/linux/*.so" > /dev/null; then
+    cp -a build/elinux/native_assets/linux/*.so "${INSTALL_DIR}/lib/"
+fi
+
+# flutter-elinux has no 32-bit ARM target platform (it maps arm to linux-x64),
+# so the hooks ran, and the manifest was written, for x64. Retarget the entries
+# that are only a dlopen by name - the SQLCipher one is - and drop the rest:
+# those are real x86 libraries, and shipping them just moves the failure to the
+# device.
+if [ "$ARCH" == "armhf" ]; then
+    python3 - << 'PY'
+import json, os
+path = os.path.join(
+    os.environ['INSTALL_DIR'], 'data/flutter_assets/NativeAssetsManifest.json'
+)
+with open(path) as f:
+    manifest = json.load(f)
+assets = manifest['native-assets']
+if list(assets) != ['linux_x64']:
+    raise SystemExit(
+        f'ERROR: expected a single linux_x64 entry in {path}, got {list(assets)}'
+    )
+portable = {}
+for asset_id, value in assets['linux_x64'].items():
+    if value[0] in ('system', 'process', 'executable'):
+        portable[asset_id] = value
+    else:
+        print(f'Dropping x86 code asset {asset_id} from the armhf manifest')
+manifest['native-assets'] = {'linux_arm': portable}
+with open(path, 'w') as f:
+    json.dump(manifest, f)
+PY
+fi
 
 # Copy the real libwebrtc.so from the pub package cache over the bundled one.
 # Its location moved in flutter_webrtc 1.5.2 (lib/libwebrtc.so) from the older

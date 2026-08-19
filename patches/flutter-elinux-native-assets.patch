@@ -1,0 +1,43 @@
+Run Dart build hooks in the elinux build
+
+package:sqlite3 3.x resolves its symbols through native assets, so an app
+that uses it needs the hooks to run and the manifest to be bundled. The
+elinux asset bundle only depended on KernelSnapshot, and loadHookResult
+then returned an empty result.
+
+diff --git a/lib/elinux_build_target.dart b/lib/elinux_build_target.dart
+--- a/lib/elinux_build_target.dart
++++ b/lib/elinux_build_target.dart
+@@ -23,6 +23,7 @@
+ import 'package:flutter_tools/src/build_system/targets/native_assets.dart';
+ import 'package:flutter_tools/src/cache.dart';
+ import 'package:flutter_tools/src/cmake.dart';
++import 'package:flutter_tools/src/devfs.dart';
+ import 'package:flutter_tools/src/globals.dart' as globals;
+ import 'package:flutter_tools/src/isolated/native_assets/dart_hook_result.dart';
+ import 'package:flutter_tools/src/project.dart';
+@@ -58,6 +59,12 @@
+   @override
+   List<Target> get dependencies => const <Target>[
+         KernelSnapshot(),
++        // Run the packages' build hooks and install what they produce. Without
++        // these the bundle carries no NativeAssetsManifest.json, and a package
++        // that resolves its symbols through native assets - package:sqlite3
++        // does - finds nothing at runtime.
++        DartBuildForNative(),
++        InstallCodeAssets(),
+       ];
+ 
+   @override
+@@ -95,6 +102,11 @@
+       targetPlatform: tp,
+       buildMode: buildMode,
+       flavor: environment.defines[kFlavor],
++      additionalContent: <String, DevFSContent>{
++        'NativeAssetsManifest.json': DevFSFileContent(
++          environment.buildDir.childFile('native_assets.json'),
++        ),
++      },
+     );
+     final DepfileService depfileService = DepfileService(
+       fileSystem: environment.fileSystem,
