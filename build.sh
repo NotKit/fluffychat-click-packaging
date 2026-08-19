@@ -14,6 +14,10 @@ fi
 FLUTTER_SDK_PATH="${ROOT}/build/flutter-elinux"
 # flutter-elinux tool (community fork ported to Flutter 3.44.0)
 FLUTTER_ELINUX_TOOL_PATH="${ROOT}/build/flutter-elinux-tool"
+# Pinned: the tool's master follows newer Flutter SDKs than the one above (it is
+# on 3.47 now, whose build_system API the 3.44 SDK does not have), and the
+# patches below are written against this revision.
+FLUTTER_ELINUX_TOOL_REV="11d98705806267afa8e5f24357be9c8d2b15938a"
 
 if [ ! -d "$FLUTTER_SDK_PATH" ]; then
     echo "Cloning Flutter SDK ${FLUTTER_VERSION}..."
@@ -22,9 +26,13 @@ if [ ! -d "$FLUTTER_SDK_PATH" ]; then
 fi
 
 if [ ! -d "$FLUTTER_ELINUX_TOOL_PATH" ]; then
-    echo "Cloning flutter-elinux tool..."
-    git clone https://github.com/flutter-elinux/flutter-elinux.git \
-        "$FLUTTER_ELINUX_TOOL_PATH" --depth 1
+    echo "Cloning flutter-elinux tool at ${FLUTTER_ELINUX_TOOL_REV}..."
+    git init -q "$FLUTTER_ELINUX_TOOL_PATH"
+    git -C "$FLUTTER_ELINUX_TOOL_PATH" remote add origin \
+        https://github.com/flutter-elinux/flutter-elinux.git
+    git -C "$FLUTTER_ELINUX_TOOL_PATH" fetch -q --depth 1 origin \
+        "$FLUTTER_ELINUX_TOOL_REV"
+    git -C "$FLUTTER_ELINUX_TOOL_PATH" checkout -q FETCH_HEAD
 fi
 
 ELINUX_TOOL_STAMP="$FLUTTER_ELINUX_TOOL_PATH/bin/cache/flutter-elinux.snapshot"
