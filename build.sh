@@ -227,6 +227,28 @@ sed -i 's/-Wall -Werror/-Wall/' "${FLUFFYCHAT_DIR}/elinux/CMakeLists.txt"
 
 cp -r "build/elinux/${FLUTTER_ARCH}/release/bundle/"* "${INSTALL_DIR}/"
 
+# The engine and gen_snapshot in build/engine-artifacts must both come from the
+# same --runtime-mode=release engine build (the one CI does). Flutter's official
+# linux artifacts are a JIT engine plus a non-product gen_snapshot, and either one
+# mixed in builds a click that aborts on the device, so check the flags the
+# snapshot asks the VM for here instead.
+python3 - "${INSTALL_DIR}/lib/libapp.so" "${FLUTTER_ARCH}" << 'PY'
+import re, sys
+path, arch = sys.argv[1], sys.argv[2]
+with open(path, 'rb') as f:
+    m = re.search(rb'(?:product|release)[ a-z0-9_-]*no-asan no-msan[ a-z0-9_-]*', f.read())
+flags = m.group().decode() if m else '<not found>'
+want = f'{arch} linux no-compressed-pointers'
+if not (flags.startswith('product ') and flags.endswith(want)):
+    sys.exit(
+        f'ERROR: libapp.so was produced by the wrong gen_snapshot.\n'
+        f'  snapshot requires: {flags}\n'
+        f'  expected:          product ... {want}\n'
+        f'  libflutter_engine.so and gen_snapshot in build/engine-artifacts/ must\n'
+        f'  both come from the release engine build in .github/workflows/build.yml.'
+    )
+PY
+
 # Code assets from the packages' build hooks land beside the bundle, not in it.
 # Put them with the other libraries, where the bare-soname dlopen the manifest
 # asks for will find them (the engine's rpath is $ORIGIN).
