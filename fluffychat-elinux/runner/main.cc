@@ -66,6 +66,7 @@ int main(int argc, char** argv) {
 
   // The Flutter instance hosted by this window.
   FlutterWindow window(view_properties, project);
+  window.SetInitialUrl(options.InitialUrl());
   if (!window.OnCreate()) {
     return 0;
   }

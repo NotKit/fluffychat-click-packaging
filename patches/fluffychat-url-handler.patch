@@ -1,0 +1,73 @@
+diff --git a/lib/main.dart b/lib/main.dart
+index d346f2271..3ff155174 100644
+--- a/lib/main.dart
++++ b/lib/main.dart
+@@ -9,6 +9,7 @@ import 'dart:ui';
+ import 'package:collection/collection.dart';
+ import 'package:fluffychat/config/app_config.dart';
+ import 'package:fluffychat/utils/client_manager.dart';
++import 'package:fluffychat/utils/lomiri_url_handler.dart';
+ import 'package:fluffychat/utils/notification_background_handler.dart';
+ import 'package:fluffychat/utils/platform_infos.dart';
+ import 'package:fluffychat/utils/start_push_foreground_service.dart';
+@@ -127,6 +128,8 @@ Future<void> startGui(List<Client> clients, SharedPreferences store) async {
+   await firstClient?.roomsLoading;
+   await firstClient?.accountDataLoading;
+ 
++  LomiriUrlHandler.init();
++
+   runApp(
+     FluffyChatApp(
+       clients: clients,
+diff --git a/lib/utils/lomiri_url_handler.dart b/lib/utils/lomiri_url_handler.dart
+new file mode 100644
+index 000000000..2eecd753b
+--- /dev/null
++++ b/lib/utils/lomiri_url_handler.dart
+@@ -0,0 +1,46 @@
++import 'package:flutter/services.dart';
++import 'package:flutter/widgets.dart';
++
++import 'package:matrix/matrix.dart';
++
++import 'package:fluffychat/widgets/fluffy_chat_app.dart';
++
++/// Opens the room behind a URL dispatched by lomiri-url-dispatcher, which is
++/// how a tapped push notification reaches the app.
++///
++/// The runner owns the platform side: it takes the URL off the command line
++/// when the tap starts the app, and off org.freedesktop.Application.Open when
++/// the app is already running. The launch URL is pulled once with
++/// getInitialUrl, because the handler below is only installed after startup.
++abstract class LomiriUrlHandler {
++  static const MethodChannel _channel = MethodChannel('fluffychat/url');
++
++  static void init() {
++    _channel.setMethodCallHandler((call) async {
++      if (call.method == 'openUrl') {
++        _open(call.arguments as String?);
++      }
++      return null;
++    });
++    _channel.invokeMethod<String>('getInitialUrl').then(_open).catchError(
++      (Object e, StackTrace s) => Logs().w('Unable to get the launch URL', e, s),
++    );
++  }
++
++  static void _open(String? url) {
++    if (url == null || url.isEmpty) return;
++
++    // The push helper builds these as fluffychat://<room id>.
++    final roomId = url.replaceFirst(RegExp('^fluffychat:/*'), '');
++    if (!roomId.startsWith('!')) {
++      Logs().w('Ignoring URL with no room id', url);
++      return;
++    }
++
++    Logs().d('Opening room from URL', roomId);
++    // The router is not mounted yet when this is the launch URL.
++    WidgetsBinding.instance.addPostFrameCallback(
++      (_) => FluffyChatApp.router.go('/rooms/$roomId'),
++    );
++  }
++}

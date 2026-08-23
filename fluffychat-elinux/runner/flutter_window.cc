@@ -11,6 +11,10 @@
 
 #include "flutter/generated_plugin_registrant.h"
 
+namespace {
+constexpr char kUrlChannelName[] = "fluffychat/url";
+}  // namespace
+
 FlutterWindow::FlutterWindow(
     const flutter::FlutterViewController::ViewProperties view_properties,
     const flutter::DartProject project)
@@ -29,7 +33,40 @@ bool FlutterWindow::OnCreate() {
   // Register Flutter plugins.
   RegisterPlugins(flutter_view_controller_->engine());
 
+  // Channel for URLs dispatched to the app (a tapped push notification). Dart
+  // pulls the launch URL with getInitialUrl, because it only installs its
+  // handler once the app is up, and later ones arrive as openUrl.
+  url_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_view_controller_->engine()->messenger(), kUrlChannelName,
+          &flutter::StandardMethodCodec::GetInstance());
+  url_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+                 result) {
+        if (call.method_name() == "getInitialUrl") {
+          if (initial_url_.empty()) {
+            result->Success();
+          } else {
+            result->Success(flutter::EncodableValue(initial_url_));
+            initial_url_.clear();
+          }
+          return;
+        }
+        result->NotImplemented();
+      });
+
+  url_service_.Start();
+
   return true;
+}
+
+void FlutterWindow::DeliverUrl(const std::string& url) {
+  if (!url_channel_) {
+    return;
+  }
+  url_channel_->InvokeMethod(
+      "openUrl", std::make_unique<flutter::EncodableValue>(url));
 }
 
 void FlutterWindow::OnDestroy() {
@@ -43,6 +80,12 @@ void FlutterWindow::Run() {
   auto next_flutter_event_time =
       std::chrono::steady_clock::time_point::clock::now();
   while (flutter_view_controller_->view()->DispatchEvent()) {
+    // URLs arrive on the D-Bus thread; hand them over here, on the platform
+    // thread, which is the only one allowed to touch the channel.
+    for (const auto& url : url_service_.TakeUrls()) {
+      DeliverUrl(url);
+    }
+
     // Wait until the next event.
     {
       auto wait_duration =

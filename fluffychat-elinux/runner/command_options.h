@@ -183,7 +183,9 @@ class CommandOptions {
           }
         }
       } else {
-        errors_.push_back("Invalid format option: " + arg);
+        // Not an option. lomiri-app-launch appends the dispatched URL here via
+        // the desktop file's %U, so keep it instead of failing to start.
+        positional_args_.push_back(arg);
       }
     }
 
@@ -197,6 +199,10 @@ class CommandOptions {
     }
 
     return errors_.size() == 0;
+  }
+
+  const std::vector<std::string>& GetPositionalArgs() const {
+    return positional_args_;
   }
 
   std::string GetError() { return errors_.size() > 0 ? errors_[0] : ""; }
@@ -395,6 +401,7 @@ class CommandOptions {
   std::unordered_map<std::string, std::string> lut_short_options_;
   std::vector<Option*> registration_order_options_;
   std::vector<std::string> errors_;
+  std::vector<std::string> positional_args_;
 };
 
 }  // namespace commandline

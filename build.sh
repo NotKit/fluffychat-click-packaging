@@ -103,6 +103,22 @@ patch -p1 --forward --reject-file=/dev/null \
 patch -p1 --forward --reject-file=/dev/null \
     < "${ROOT}/patches/fluffychat-lomiri-push.patch" 2>/dev/null || true
 
+# Report the real timeline error instead of crashing in the error reporter when
+# the chat page was disposed while the timeline was still loading.
+patch -p1 --forward --reject-file=/dev/null \
+    < "${ROOT}/patches/fluffychat-timeline-error-context.patch" 2>/dev/null || true
+
+# Raise notifications through the postal service. AppArmor blocks a confined
+# app from reaching org.freedesktop.Notifications, so the flutter_local_
+# notifications path can only ever fail here.
+patch -p1 --forward --reject-file=/dev/null \
+    < "${ROOT}/patches/fluffychat-postal-notifications.patch" 2>/dev/null || true
+
+# Open the room behind a URL dispatched to the app, which is what a tapped
+# notification turns into.
+patch -p1 --forward --reject-file=/dev/null \
+    < "${ROOT}/patches/fluffychat-url-handler.patch" 2>/dev/null || true
+
 # package:sqlite3 no longer dlopens by name: it declares a native asset built by
 # its own hook, which by default downloads a prebuilt SQLCipher for the target.
 # Point it at the system instead, so it resolves libsqlcipher.so - the one this

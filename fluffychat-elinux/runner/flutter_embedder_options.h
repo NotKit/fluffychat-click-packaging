@@ -112,6 +112,17 @@ class FlutterEmbedderOptions {
   }
 
   std::string BundlePath() const { return bundle_path_; }
+
+  // The URL lomiri-app-launch passed on the command line, if the app was
+  // started by the url-dispatcher (notification tap) rather than by its icon.
+  std::string InitialUrl() {
+    for (const auto& arg : options_.GetPositionalArgs()) {
+      if (arg.find("://") != std::string::npos) {
+        return arg;
+      }
+    }
+    return "";
+  }
   bool IsUseMouseCursor() const { return use_mouse_cursor_; }
   bool IsUseOnscreenKeyboard() const { return use_onscreen_keyboard_; }
   bool IsUseWindowDecoraation() const { return use_window_decoration_; }
