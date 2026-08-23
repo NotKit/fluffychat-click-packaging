@@ -1,0 +1,19 @@
+diff --git a/lib/pages/chat/chat.dart b/lib/pages/chat/chat.dart
+index cf82ac748..93db9f91c 100644
+--- a/lib/pages/chat/chat.dart
++++ b/lib/pages/chat/chat.dart
+@@ -486,7 +486,13 @@ class ChatController extends State<ChatPageWithRoom>
+ 
+       if (!mounted) return;
+     } catch (e, s) {
+-      ErrorReporter(context, 'Unable to load timeline').onErrorCallback(e, s);
++      // The page can be disposed while the timeline is still loading. Touching
++      // context then throws on its own and buries the actual failure.
++      if (mounted) {
++        ErrorReporter(context, 'Unable to load timeline').onErrorCallback(e, s);
++      } else {
++        Logs().w('Unable to load timeline', e, s);
++      }
+       rethrow;
+     }
+   }
