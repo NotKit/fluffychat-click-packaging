@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -72,6 +73,48 @@ class LomiriPushClient {
       debugPrint('lomiri_push_client: listPersistent failed: ${e.message}');
       return const [];
     }
+  }
+
+  /// Raises a notification through the postal service.
+  ///
+  /// AppArmor does not let a confined app talk to
+  /// org.freedesktop.Notifications, so flutter_local_notifications cannot work
+  /// here; postal is the sanctioned route and is already allowed by the
+  /// push-notification-client policy group.
+  ///
+  /// [actions] are URLs; the first is opened when the notification is tapped.
+  /// [tag] groups a room's notifications so [clearPersistent] can drop them.
+  static Future<void> post({
+    required String summary,
+    required String body,
+    String? tag,
+    String? icon,
+    List<String> actions = const [],
+    bool sound = false,
+    bool vibrate = false,
+    int? counter,
+  }) async {
+    final notification = <String, Object?>{
+      'card': <String, Object?>{
+        'summary': summary,
+        'body': body,
+        'popup': true,
+        'persist': true,
+        if (icon != null) 'icon': icon,
+        if (actions.isNotEmpty) 'actions': actions,
+      },
+      'sound': sound,
+      'vibrate': vibrate,
+      if (tag != null) 'tag': tag,
+      if (counter != null)
+        'emblem-counter': <String, Object?>{
+          'count': counter,
+          'visible': counter > 0,
+        },
+    };
+    await _invoke<void>('post', {
+      'notification': jsonEncode({'notification': notification}),
+    });
   }
 
   /// Dismisses notifications by tag; an empty [tags] clears all of them.

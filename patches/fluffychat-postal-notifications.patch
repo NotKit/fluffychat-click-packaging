@@ -1,0 +1,63 @@
+diff --git a/lib/widgets/local_notifications_extension.dart b/lib/widgets/local_notifications_extension.dart
+index 840a7d4b9..5a0065011 100644
+--- a/lib/widgets/local_notifications_extension.dart
++++ b/lib/widgets/local_notifications_extension.dart
+@@ -5,6 +5,7 @@
+ 
+ import 'package:fluffychat/config/setting_keys.dart';
+ import 'package:fluffychat/l10n/l10n.dart';
++import 'package:lomiri_push_client/lomiri_push_client.dart';
+ import 'package:fluffychat/utils/client_download_content_extension.dart';
+ import 'package:fluffychat/utils/matrix_sdk_extensions/matrix_locals.dart';
+ import 'package:fluffychat/utils/notification_background_handler.dart';
+@@ -22,7 +23,6 @@ extension LocalNotificationsExtension on MatrixState {
+     ..load();
+ 
+   Future<void> showLocalNotification(Event event) async {
+-    final l10n = L10n.of(context);
+     final roomId = event.room.id;
+     if (activeRoomId == roomId) {
+       if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
+@@ -83,30 +83,19 @@ extension LocalNotificationsExtension on MatrixState {
+       return;
+     }
+ 
+-    FlutterLocalNotificationsPlugin().show(
+-      id: event.room.id.hashCode,
+-      title: title,
++    // A confined Ubuntu Touch app is not allowed to talk to
++    // org.freedesktop.Notifications, so flutter_local_notifications only ever
++    // throws AccessDenied here. Postal is the sanctioned route, and it gives
++    // the same notification the push helper raises: tapping it dispatches the
++    // URL back to us and opens the room.
++    await LomiriPushClient.post(
++      summary: title,
+       body: body,
+-      notificationDetails: NotificationDetails(
+-        linux: LinuxNotificationDetails(
+-          sound: ThemeLinuxSound('message-new-instant'),
+-          actions: [
+-            LinuxNotificationAction(
+-              key: FluffyChatNotificationActions.markAsRead.name,
+-              label: l10n.markAsRead,
+-            ),
+-            LinuxNotificationAction(
+-              key: FluffyChatNotificationActions.mute.name,
+-              label: l10n.mute,
+-            ),
+-          ],
+-        ),
+-      ),
+-      payload: FluffyChatPushPayload(
+-        client.clientName,
+-        event.room.id,
+-        event.eventId,
+-      ).toString(),
++      tag: event.room.id,
++      icon: event.room.isDirectChat ? 'contact' : 'contact-group',
++      actions: ['fluffychat://${event.room.id}'],
++      sound: true,
++      vibrate: true,
+     );
+   }
+ }

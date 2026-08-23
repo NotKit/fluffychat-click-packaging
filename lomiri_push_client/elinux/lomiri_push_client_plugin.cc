@@ -216,6 +216,24 @@ static void DoListPersistent(std::string app_id, Result result) {
 }
 
 // Dismisses notifications by tag; an empty tag list clears all of them.
+// Posts a notification through the postal service. Confined apps cannot reach
+// org.freedesktop.Notifications, so this is the only way to raise one.
+static void DoPost(std::string app_id, std::string notification,
+                   Result result) {
+  GError* err = nullptr;
+  GVariant* reply =
+      CallSync(kPostalService, kPostalPathPrefix + NihQuote(PackageOf(app_id)),
+               kPostalIface, "Post",
+               g_variant_new("(ss)", app_id.c_str(), notification.c_str()),
+               /*reply_type=*/nullptr, /*timeout_ms=*/-1, &err);
+  if (!reply) {
+    FailWith(result, "POST", err, "Post failed");
+    return;
+  }
+  g_variant_unref(reply);
+  result->Success();
+}
+
 static void DoClearPersistent(std::string app_id, std::vector<std::string> tags,
                               Result result) {
   std::vector<const gchar*> strv;
@@ -319,6 +337,22 @@ void LomiriPushClientPlugin::HandleMethodCall(
   if (method == "listPersistent") {
     std::thread([id = std::move(app_id), res = std::move(result)]() mutable {
       DoListPersistent(std::move(id), std::move(res));
+    }).detach();
+    return;
+  }
+
+  if (method == "post") {
+    std::string notification;
+    if (const auto* v = lookup("notification")) {
+      if (const auto* str = std::get_if<std::string>(v)) notification = *str;
+    }
+    if (notification.empty()) {
+      result->Error("POST", "notification is required");
+      return;
+    }
+    std::thread([id = std::move(app_id), n = std::move(notification),
+                 res = std::move(result)]() mutable {
+      DoPost(std::move(id), std::move(n), std::move(res));
     }).detach();
     return;
   }
