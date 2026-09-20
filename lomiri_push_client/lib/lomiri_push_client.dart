@@ -84,12 +84,15 @@ class LomiriPushClient {
   ///
   /// [actions] are URLs; the first is opened when the notification is tapped.
   /// [tag] groups a room's notifications so [clearPersistent] can drop them.
+  /// With [popup] false the notification only reaches the messaging menu,
+  /// without a bubble on screen.
   static Future<void> post({
     required String summary,
     required String body,
     String? tag,
     String? icon,
     List<String> actions = const [],
+    bool popup = true,
     bool sound = false,
     bool vibrate = false,
     int? counter,
@@ -98,7 +101,7 @@ class LomiriPushClient {
       'card': <String, Object?>{
         'summary': summary,
         'body': body,
-        'popup': true,
+        'popup': popup,
         'persist': true,
         if (icon != null) 'icon': icon,
         if (actions.isNotEmpty) 'actions': actions,
